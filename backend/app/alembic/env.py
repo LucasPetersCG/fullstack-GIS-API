@@ -17,7 +17,7 @@ from app.core.database import Base
 from app.core.config import settings
 # Importar TODOS os modelos para o autogenerate funcionar
 from app.models.user import User
-from app.models.census import CensusTract
+from app.models.city import City, CityCatalog
 
 config = context.config
 
@@ -38,8 +38,22 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
+def include_object(object, name, type_, reflected, compare_to):
+    # Lista de tabelas do NOSSO sistema (White List)
+    # Se a tabela não estiver aqui, o Alembic deve ignorá-la.
+    # alembic_version é a tabela interna do próprio alembic.
+    my_tables = ["users", "cities", "city_catalog", "alembic_version"]
+    
+    if type_ == "table":
+        # Se a tabela NÃO estiver na nossa lista, IGNORE.
+        # Isso protege as tabelas do PostGIS (spatial_ref_sys) e Tiger Geocoder.
+        if name not in my_tables:
+            return False
+            
+    return True
+
 def do_run_migrations(connection: Connection) -> None:
-    context.configure(connection=connection, target_metadata=target_metadata)
+    context.configure(connection=connection, target_metadata=target_metadata, include_object=include_object)
 
     with context.begin_transaction():
         context.run_migrations()

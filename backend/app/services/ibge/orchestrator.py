@@ -1,49 +1,51 @@
-# app/services/ibge/orchestrator.py
+# backend/app/services/ibge/orchestrator.py
 import logging
-import geopandas as gpd
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.services.ibge.geometry import IbgeGeometryService
 from app.services.ibge.demographics import IbgeDemographicsService
-from app.repositories.census_repository import CensusRepository # Novo import
+from app.repositories.city_repository import CityRepository
 
 logger = logging.getLogger(__name__)
 
 class IbgeEtlOrchestrator:
-    def __init__(self, db: AsyncSession = None):
-        # Agora aceitamos uma sessão de banco opcional
+    def __init__(self, db: AsyncSession):
         self.db = db
         self.geo_service = IbgeGeometryService()
         self.demo_service = IbgeDemographicsService()
+        self.repo = CityRepository(db)
 
-    async def _extract_transform(self) -> gpd.GeoDataFrame:
-        """Método interno que faz apenas o E e o T do ETL."""
-        logger.info("🔄 Iniciando Pipeline de ETL...")
+    async def sync_catalog(self):
+        """
+        Baixa a lista de TODOS os municípios do Brasil e salva no banco.
+        Operação pesada (5.570 registros), deve ser feita esporadicamente.
+        """
+        logger.info("🔄 Iniciando sincronização do Catálogo de Cidades...")
+        cities_list = await self.demo_service.fetch_all_cities_catalog()
         
-        gdf = await self.geo_service.fetch_tracts()
-        df_stats = await self.demo_service.fetch_population()
-        
-        logger.info(f"Merging: {len(gdf)} setores + {len(df_stats)} registros.")
-        
-        gdf_final = gdf.merge(df_stats, on="code", how="left")
-        gdf_final["population"] = gdf_final["population"].fillna(0)
-        
-        return gdf_final
+        if not cities_list:
+            raise ValueError("Falha ao baixar catálogo do IBGE.")
+            
+        await self.repo.update_catalog(cities_list)
+        return {"status": "success", "total": len(cities_list)}
 
-    async def get_consolidated_data_json(self) -> str:
-        """Retorna JSON direto (apenas para visualização rápida)."""
-        gdf = await self._extract_transform()
-        return gdf.to_json()
+    async def import_city(self, city_code: str):
+        """
+        ETL On-Demand: Baixa Geometria e População de UMA cidade e salva.
+        """
+        logger.info(f"🔄 Importando cidade {city_code}...")
+        
+        # 1. Busca Paralela (Idealmente), aqui faremos sequencial por simplicidade
+        gdf = await self.geo_service.fetch_city_geom(city_code)
+        population = await self.demo_service.fetch_city_population(city_code)
+        
+        if gdf.empty:
+            raise ValueError(f"Geometria não encontrada para cidade {city_code}")
 
-    async def sync_database(self):
-        """Executa o ETL completo e salva no banco (Load)."""
-        if not self.db:
-            raise ValueError("Database session required for sync.")
+        # 2. Persistência
+        await self.repo.save_city(gdf, population)
         
-        # 1. Extract & Transform
-        gdf = await self._extract_transform()
-        
-        # 2. Load (Repository)
-        repo = CensusRepository(self.db)
-        await repo.save_tracts(gdf)
-        
-        return {"status": "success", "imported": len(gdf)}
+        return {
+            "status": "success", 
+            "city": gdf["code"].iloc[0], 
+            "population": population
+        }

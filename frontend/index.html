@@ -3,93 +3,136 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Atibaia Geo-Insights</title>
-    
-    <!-- Leaflet CSS -->
+    <title>Geo-Insights Brasil</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    
     <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 100vh; width: 100%; }
+        body { margin: 0; font-family: sans-serif; }
+        #map { height: 100vh; width: 100%; z-index: 1; }
         
-        /* Estilo do Painel de Legenda */
-        .info {
-            padding: 10px;
-            background: white;
-            background: rgba(255,255,255,0.9);
-            box-shadow: 0 0 15px rgba(0,0,0,0.2);
-            border-radius: 5px;
+        /* UI Sobreposta */
+        .ui-container {
+            position: absolute; top: 10px; left: 50px; z-index: 1000;
+            background: white; padding: 10px; border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2); width: 300px;
         }
-        .info h4 {
-            margin: 0 0 5px;
-            color: #777;
+        input { width: 100%; padding: 8px; box-sizing: border-box; }
+        #suggestions { 
+            max-height: 200px; overflow-y: auto; border: 1px solid #ccc; 
+            display: none; background: white;
         }
+        .suggestion-item { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
+        .suggestion-item:hover { background-color: #f0f0f0; }
+        
+        .loading { color: blue; font-size: 0.9em; display: none; }
+        .auth-warning { color: red; font-size: 0.8em; margin-top: 5px; display: none; }
     </style>
 </head>
 <body>
 
+<div class="ui-container">
+    <h3>Adicionar Município</h3>
+    <input type="text" id="search" placeholder="Digite o nome (ex: Atibaia)..." autocomplete="off">
+    <div id="suggestions"></div>
+    <div id="loading" class="loading">⏳ Importando dados do IBGE...</div>
+    <div id="auth-msg" class="auth-warning">⚠️ Você precisa estar logado no Swagger ou ter o token. (Demo: Importação falhará se não tiver token no browser, use o Swagger para testar o POST)</div>
+</div>
+
 <div id="map"></div>
 
-<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-
 <script>
-    // 1. Inicializa o mapa focado em Atibaia
-    const map = L.map('map').setView([-23.12, -46.56], 14);
+    // 1. Mapa Base
+    const map = L.map('map').setView([-15.7, -47.8], 4); // Visão Brasil
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
 
-    // 2. Mapa base (OpenStreetMap)
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '© OpenStreetMap'
+    // Camada de Cidades
+    let citiesLayer = L.geoJSON(null, {
+        style: (feature) => ({
+            fillColor: getColor(feature.properties.population),
+            weight: 1, opacity: 1, color: 'white', fillOpacity: 0.7
+        }),
+        onEachFeature: (feature, layer) => {
+            layer.bindPopup(`<b>${feature.properties.name}</b><br>População: ${feature.properties.population}`);
+        }
     }).addTo(map);
 
-    // 3. Define as cores baseadas na população (Choropleth Logic)
     function getColor(d) {
-        return d > 3000 ? '#800026' :
-               d > 2000 ? '#BD0026' :
-               d > 1000 ? '#E31A1C' :
-               d > 500  ? '#FC4E2A' :
-               d > 200  ? '#FD8D3C' :
-               d > 100  ? '#FEB24C' :
-               d > 50   ? '#FED976' :
-                          '#FFEDA0';
+        return d > 500000 ? '#800026' : d > 100000 ? '#BD0026' : d > 50000 ? '#E31A1C' :
+               d > 10000 ? '#FD8D3C' : '#FEB24C';
     }
 
-    // 4. Estilo de cada polígono
-    function style(feature) {
-        return {
-            fillColor: getColor(feature.properties.population),
-            weight: 2,
-            opacity: 1,
-            color: 'white',
-            dashArray: '3',
-            fillOpacity: 0.7
-        };
+    // 2. Carregar Mapa Inicial
+    function loadMap() {
+        fetch('/map').then(r => r.json()).then(data => {
+            citiesLayer.clearLayers();
+            citiesLayer.addData(data);
+            if (data.features.length > 0) {
+                map.fitBounds(citiesLayer.getBounds());
+            }
+        });
     }
+    loadMap();
 
-    // 5. Interação (Popup ao clicar)
-    function onEachFeature(feature, layer) {
-        if (feature.properties) {
-            layer.bindPopup(`
-                <h3>Setor: ${feature.properties.code}</h3>
-                <p><b>População:</b> ${feature.properties.population} habitantes</p>
-            `);
+    // 3. Lógica de Busca
+    const searchInput = document.getElementById('search');
+    const suggestions = document.getElementById('suggestions');
+    const loading = document.getElementById('loading');
+
+    searchInput.addEventListener('input', async (e) => {
+        const query = e.target.value;
+        if (query.length < 3) { suggestions.style.display = 'none'; return; }
+
+        const res = await fetch(`/cities/search?q=${query}`);
+        const list = await res.json();
+        
+        suggestions.innerHTML = '';
+        suggestions.style.display = list.length ? 'block' : 'none';
+        
+        list.forEach(city => {
+            const div = document.createElement('div');
+            div.className = 'suggestion-item';
+            div.innerText = `${city.name} - ${city.uf}`;
+            div.onclick = () => importCity(city.code);
+            suggestions.appendChild(div);
+        });
+    });
+
+    // 4. Importar Cidade (Atenção: Requer Auth)
+    async function importCity(code) {
+        suggestions.style.display = 'none';
+        searchInput.value = '';
+        loading.style.display = 'block';
+
+        // NOTA: Em um app real, o token JWT estaria salvo no LocalStorage
+        // Aqui vamos tentar chamar, se der 401 avisamos
+        
+        // PEGANDO O TOKEN DO LOCALSTORAGE (Simulação)
+        // Para testar via browser, você teria que implementar login no front.
+        // Vamos assumir que você testará a importação via Swagger e o front só lê.
+        // MAS, vou deixar o fetch aqui. Se der 401, aparecerá o alerta.
+        
+        const token = localStorage.getItem("token"); // Implementaremos login no front depois
+        const headers = token ? { "Authorization": `Bearer ${token}` } : {};
+
+        try {
+            const res = await fetch(`/cities/import/${code}`, { 
+                method: 'POST',
+                headers: headers 
+            });
+            
+            if (res.status === 401) {
+                alert("🔒 Erro: Você precisa estar autenticado para importar dados!");
+            } else if (res.ok) {
+                loadMap(); // Recarrega o mapa com a nova cidade
+            } else {
+                alert("Erro ao importar cidade.");
+            }
+        } catch (e) {
+            console.error(e);
+        } finally {
+            loading.style.display = 'none';
         }
     }
-
-    // 6. Consome nossa API e renderiza
-    fetch('/map')
-        .then(res => res.json())
-        .then(data => {
-            // Adiciona a camada GeoJSON ao mapa
-            L.geoJSON(data, {
-                style: style,
-                onEachFeature: onEachFeature
-            }).addTo(map);
-        })
-        .catch(err => console.error("Erro ao carregar dados:", err));
-
 </script>
-
 </body>
 </html>

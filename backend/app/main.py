@@ -1,64 +1,72 @@
 # backend/app/main.py
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Response, Depends
+from fastapi import FastAPI, Response, Depends, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession
-from app.core.init_db import init_tables
+from typing import List
+
+# Imports internos
+from app.core.init_db import init_tables # (Se tiver comentado no passo anterior, mantenha comentado)
 from app.core.database import get_db
 from app.services.ibge.orchestrator import IbgeEtlOrchestrator
-from app.repositories.census_repository import CensusRepository
+from app.repositories.city_repository import CityRepository
 from app.schemas.geo import FeatureCollection
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.routers import auth
 
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Executa criação das tabelas ao ligar o servidor
-    #await init_tables()
+    # await init_tables() # Mantemos desligado pois usamos Alembic
     yield
 
 app = FastAPI(title="Atibaia Geo-Insights", lifespan=lifespan)
+
+# Autenticação
 app.include_router(auth.router, tags=["auth"])
 
+# --- ROTAS DE ADMINISTRAÇÃO (ETL) ---
 
-# --- ROTAS DE API (BACKEND) ---
-
-@app.get("/")
-async def health_check():
-    return {"status": "ok", "message": "Geo-Insights API is running"}
-
-@app.get("/etl/preview")
-async def preview_etl():
-    """Visualiza o JSON gerado pelo ETL (sem salvar no banco)."""
-    orchestrator = IbgeEtlOrchestrator()
-    geojson_data = await orchestrator.get_consolidated_data_json()
-    return Response(content=geojson_data, media_type="application/json")
-
-@app.post("/etl/sync")
-async def sync_etl(
+@app.post("/admin/sync-catalog")
+async def sync_catalog(
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(get_current_user) # <--- O CADEADO
+    current_user: User = Depends(get_current_user) # Requer Login
 ):
-    """
-    Executa o ETL e Salva no Banco.
-    REQUER AUTENTICAÇÃO (JWT).
-    """
-    # (Opcional) Log de quem executou
-    print(f"Usuário {current_user.username} iniciou o ETL.")
-    
-    orchestrator = IbgeEtlOrchestrator(db=db)
-    result = await orchestrator.sync_database()
-    return result
+    """Atualiza a lista de 5.570 municípios (Base para o Search)."""
+    orchestrator = IbgeEtlOrchestrator(db)
+    return await orchestrator.sync_catalog()
+
+@app.post("/cities/import/{city_code}")
+async def import_specific_city(
+    city_code: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user) # Requer Login
+):
+    """Baixa dados reais do IBGE para uma cidade e coloca no mapa."""
+    orchestrator = IbgeEtlOrchestrator(db)
+    try:
+        return await orchestrator.import_city(city_code)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+# --- ROTAS PÚBLICAS (LEITURA) ---
+
+@app.get("/cities/search")
+async def search_cities(
+    q: str = Query(..., min_length=3),
+    db: AsyncSession = Depends(get_db)
+):
+    """Autocomplete: Busca cidades pelo nome no catálogo local."""
+    repo = CityRepository(db)
+    results = await repo.list_catalog(search=q)
+    return [{"code": r.code, "name": r.name, "uf": r.uf} for r in results]
 
 @app.get("/map", response_model=FeatureCollection)
 async def get_map_data(db: AsyncSession = Depends(get_db)):
-    """Endpoint consumido pelo Frontend."""
-    repo = CensusRepository(db)
+    """Retorna todas as cidades que já foram importadas."""
+    repo = CityRepository(db)
     features = await repo.get_all_features()
     return {"type": "FeatureCollection", "features": features}
 
-# --- ROTA DE FRONTEND (MONOREPO) ---
-# Montamos a pasta /frontend (do container) na URL /view
+# --- FRONTEND ---
 app.mount("/view", StaticFiles(directory="/frontend", html=True), name="frontend")

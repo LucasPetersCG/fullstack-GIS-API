@@ -16,7 +16,7 @@ from app.routers import auth
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Executa criação das tabelas ao ligar o servidor
-    await init_tables()
+    #await init_tables()
     yield
 
 app = FastAPI(title="Atibaia Geo-Insights", lifespan=lifespan)

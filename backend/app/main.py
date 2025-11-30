@@ -8,6 +8,10 @@ from app.core.database import get_db
 from app.services.ibge.orchestrator import IbgeEtlOrchestrator
 from app.repositories.census_repository import CensusRepository
 from app.schemas.geo import FeatureCollection
+from app.api.deps import get_current_user
+from app.models.user import User
+from app.routers import auth
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -16,6 +20,8 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Atibaia Geo-Insights", lifespan=lifespan)
+app.include_router(auth.router, tags=["auth"])
+
 
 # --- ROTAS DE API (BACKEND) ---
 
@@ -31,8 +37,17 @@ async def preview_etl():
     return Response(content=geojson_data, media_type="application/json")
 
 @app.post("/etl/sync")
-async def sync_etl(db: AsyncSession = Depends(get_db)):
-    """Executa o ETL e Salva no Banco de Dados."""
+async def sync_etl(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user) # <--- O CADEADO
+):
+    """
+    Executa o ETL e Salva no Banco.
+    REQUER AUTENTICAÇÃO (JWT).
+    """
+    # (Opcional) Log de quem executou
+    print(f"Usuário {current_user.username} iniciou o ETL.")
+    
     orchestrator = IbgeEtlOrchestrator(db=db)
     result = await orchestrator.sync_database()
     return result

@@ -1,8 +1,8 @@
 # app/core/init_db.py
 import logging
 from app.core.database import engine, Base
-# Importante: Importar o modelo aqui para que o SQLAlchemy saiba que ele existe
-from app.models.census import CensusTract 
+from app.models.census import CensusTract
+from app.models.user import User
 
 logger = logging.getLogger(__name__)
 

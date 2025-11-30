@@ -1,32 +1,35 @@
 # app/main.py
-from fastapi import FastAPI, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from app.core.database import get_db
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Response, Depends
+from sqlalchemy.ext.asyncio import AsyncSession # Novo
+from app.core.database import get_db # Novo (Injeção de dependência)
+from app.core.init_db import init_tables
+from app.services.ibge.orchestrator import IbgeEtlOrchestrator
 
-app = FastAPI(title="Atibaia Geo-Insights")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_tables()
+    yield
+
+app = FastAPI(title="Atibaia Geo-Insights", lifespan=lifespan)
 
 @app.get("/")
 async def health_check():
     return {"status": "ok", "message": "Geo-Insights API is running"}
 
-@app.get("/db-check")
-async def test_database(db: AsyncSession = Depends(get_db)):
+# Rota Antiga (Apenas visualiza JSON)
+@app.get("/etl/preview")
+async def preview_etl():
+    orchestrator = IbgeEtlOrchestrator()
+    geojson_data = await orchestrator.get_consolidated_data_json()
+    return Response(content=geojson_data, media_type="application/json")
+
+# NOVA ROTA: Executa o ETL e Salva no Banco
+@app.post("/etl/sync")
+async def sync_etl(db: AsyncSession = Depends(get_db)):
     """
-    Testa a conexão com o banco e verifica a versão do PostGIS.
-    Isso garante que a extensão espacial está ativa.
+    Dispara o processo de Extração e Carga no Banco de Dados.
     """
-    try:
-        # Executa uma query SQL crua para pedir a versão do PostGIS
-        result = await db.execute(text("SELECT postgis_full_version()"))
-        version = result.scalar()
-        return {
-            "status": "success",
-            "database": "connected",
-            "postgis_version": version
-        }
-    except Exception as e:
-        return {
-            "status": "error",
-            "message": str(e)
-        }
+    orchestrator = IbgeEtlOrchestrator(db=db)
+    result = await orchestrator.sync_database()
+    return result

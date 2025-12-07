@@ -6,53 +6,94 @@
     <title>Geo-Insights Brasil</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        body { margin: 0; font-family: sans-serif; }
+        body { margin: 0; font-family: sans-serif; overflow: hidden; }
         #map { height: 100vh; width: 100%; z-index: 1; }
         
-        /* UI Sobreposta */
+        /* UI Flutuante */
         .ui-container {
-            position: absolute; top: 10px; left: 50px; z-index: 1000;
-            background: white; padding: 10px; border-radius: 5px;
-            box-shadow: 0 0 15px rgba(0,0,0,0.2); width: 300px;
+            position: absolute; top: 20px; left: 60px; z-index: 1000;
+            background: white; padding: 15px; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 320px;
         }
-        input { width: 100%; padding: 8px; box-sizing: border-box; }
-        #suggestions { 
-            max-height: 200px; overflow-y: auto; border: 1px solid #ccc; 
-            display: none; background: white;
-        }
-        .suggestion-item { padding: 8px; cursor: pointer; border-bottom: 1px solid #eee; }
-        .suggestion-item:hover { background-color: #f0f0f0; }
+        .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
+        h3 { margin: 0; font-size: 1.1rem; color: #333; }
         
-        .loading { color: blue; font-size: 0.9em; display: none; }
-        .auth-warning { color: red; font-size: 0.8em; margin-top: 5px; display: none; }
+        /* Botão de Auth */
+        .auth-btn { font-size: 0.8rem; padding: 5px 10px; border: 1px solid #ccc; background: #f8f9fa; border-radius: 4px; cursor: pointer; text-decoration: none; color: #333; }
+        .auth-btn:hover { background: #e2e6ea; }
+        .logout { color: #dc3545; border-color: #dc3545; color: white; background: #dc3545; }
+        
+        input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
+        #suggestions { max-height: 250px; overflow-y: auto; border: 1px solid #eee; display: none; background: white; margin-top: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
+        .suggestion-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: 0.9rem; }
+        .suggestion-item:hover { background-color: #f0f8ff; color: #0056b3; }
+        
+        .loading { color: #007bff; font-size: 0.9em; display: none; margin-top: 10px; text-align: center; }
+        .status-msg { font-size: 0.85em; margin-top: 10px; text-align: center; }
+        .success { color: green; } .error { color: red; }
     </style>
 </head>
 <body>
 
 <div class="ui-container">
-    <h3>Adicionar Município</h3>
-    <input type="text" id="search" placeholder="Digite o nome (ex: Atibaia)..." autocomplete="off">
+    <div class="header-row">
+        <h3>Explorador de Municípios</h3>
+        <a id="authBtn" class="auth-btn" href="/login">Login</a>
+    </div>
+    
+    <input type="text" id="search" placeholder="Buscar cidade (ex: Ouro Preto)..." autocomplete="off">
     <div id="suggestions"></div>
-    <div id="loading" class="loading">⏳ Importando dados do IBGE...</div>
-    <div id="auth-msg" class="auth-warning">⚠️ Você precisa estar logado no Swagger ou ter o token. (Demo: Importação falhará se não tiver token no browser, use o Swagger para testar o POST)</div>
+    
+    <div id="loading" class="loading">
+        🔄 Conectando ao IBGE...<br><small>Isso pode levar alguns segundos.</small>
+    </div>
+    <div id="statusMsg" class="status-msg"></div>
 </div>
 
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // 1. Mapa Base
-    const map = L.map('map').setView([-15.7, -47.8], 4); // Visão Brasil
+    // --- 1. Gerenciamento de Auth ---
+    const authBtn = document.getElementById('authBtn');
+    
+    function updateAuthUI() {
+        const token = localStorage.getItem('geo_token');
+        if (token) {
+            authBtn.innerText = "Sair (Logout)";
+            authBtn.classList.add("logout");
+            authBtn.href = "#";
+            authBtn.onclick = (e) => {
+                e.preventDefault();
+                localStorage.removeItem('geo_token');
+                window.location.reload();
+            };
+        } else {
+            authBtn.innerText = "Login (Admin)";
+            authBtn.classList.remove("logout");
+            authBtn.href = "/view/login.html";
+            authBtn.onclick = null;
+        }
+    }
+    updateAuthUI();
+
+    // --- 2. Mapa Leaflet ---
+    const map = L.map('map').setView([-15.7, -47.8], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
 
-    // Camada de Cidades
     let citiesLayer = L.geoJSON(null, {
         style: (feature) => ({
             fillColor: getColor(feature.properties.population),
             weight: 1, opacity: 1, color: 'white', fillOpacity: 0.7
         }),
         onEachFeature: (feature, layer) => {
-            layer.bindPopup(`<b>${feature.properties.name}</b><br>População: ${feature.properties.population}`);
+            const pop = feature.properties.population.toLocaleString('pt-BR');
+            layer.bindPopup(`
+                <div style="text-align: center;">
+                    <b>${feature.properties.name}</b><br>
+                    <span style="font-size:1.2em; color:#555;">${pop} hab.</span>
+                </div>
+            `);
         }
     }).addTo(map);
 
@@ -61,57 +102,62 @@
                d > 10000 ? '#FD8D3C' : '#FEB24C';
     }
 
-    // 2. Carregar Mapa Inicial
-    function loadMap() {
-        fetch('/map').then(r => r.json()).then(data => {
+    async function loadMap() {
+        try {
+            const res = await fetch('/map');
+            const data = await res.json();
             citiesLayer.clearLayers();
             citiesLayer.addData(data);
             if (data.features.length > 0) {
-                map.fitBounds(citiesLayer.getBounds());
+                // Foca apenas se tiver dados, senão mantém visão Brasil
+                const group = new L.featureGroup(citiesLayer.getLayers());
+                map.fitBounds(group.getBounds().pad(0.1));
             }
-        });
+        } catch(e) { console.error("Erro ao carregar mapa", e); }
     }
-    loadMap();
+    loadMap(); // Carrega ao iniciar
 
-    // 3. Lógica de Busca
+    // --- 3. Busca e Importação ---
     const searchInput = document.getElementById('search');
     const suggestions = document.getElementById('suggestions');
     const loading = document.getElementById('loading');
+    const statusMsg = document.getElementById('statusMsg');
 
-    searchInput.addEventListener('input', async (e) => {
+    // Debounce para não floodar a API
+    let debounceTimer;
+    searchInput.addEventListener('input', (e) => {
+        clearTimeout(debounceTimer);
         const query = e.target.value;
+        statusMsg.innerText = "";
+        
         if (query.length < 3) { suggestions.style.display = 'none'; return; }
 
-        const res = await fetch(`/cities/search?q=${query}`);
-        const list = await res.json();
-        
-        suggestions.innerHTML = '';
-        suggestions.style.display = list.length ? 'block' : 'none';
-        
-        list.forEach(city => {
-            const div = document.createElement('div');
-            div.className = 'suggestion-item';
-            div.innerText = `${city.name} - ${city.uf}`;
-            div.onclick = () => importCity(city.code);
-            suggestions.appendChild(div);
-        });
+        debounceTimer = setTimeout(async () => {
+            try {
+                const res = await fetch(`/cities/search?q=${query}`);
+                const list = await res.json();
+                
+                suggestions.innerHTML = '';
+                suggestions.style.display = list.length ? 'block' : 'none';
+                
+                list.forEach(city => {
+                    const div = document.createElement('div');
+                    div.className = 'suggestion-item';
+                    div.innerText = `${city.name} - ${city.uf}`;
+                    div.onclick = () => importCity(city.code, city.name);
+                    suggestions.appendChild(div);
+                });
+            } catch (e) { console.error(e); }
+        }, 300);
     });
 
-    // 4. Importar Cidade (Atenção: Requer Auth)
-    async function importCity(code) {
+    async function importCity(code, name) {
         suggestions.style.display = 'none';
-        searchInput.value = '';
+        searchInput.value = name;
         loading.style.display = 'block';
+        statusMsg.innerText = "";
 
-        // NOTA: Em um app real, o token JWT estaria salvo no LocalStorage
-        // Aqui vamos tentar chamar, se der 401 avisamos
-        
-        // PEGANDO O TOKEN DO LOCALSTORAGE (Simulação)
-        // Para testar via browser, você teria que implementar login no front.
-        // Vamos assumir que você testará a importação via Swagger e o front só lê.
-        // MAS, vou deixar o fetch aqui. Se der 401, aparecerá o alerta.
-        
-        const token = localStorage.getItem("token"); // Implementaremos login no front depois
+        const token = localStorage.getItem('geo_token');
         const headers = token ? { "Authorization": `Bearer ${token}` } : {};
 
         try {
@@ -121,14 +167,17 @@
             });
             
             if (res.status === 401) {
-                alert("🔒 Erro: Você precisa estar autenticado para importar dados!");
+                statusMsg.innerHTML = "<span class='error'>🔒 Faça Login para importar dados!</span>";
+                alert("Você precisa estar logado! Clique no botão Login.");
             } else if (res.ok) {
-                loadMap(); // Recarrega o mapa com a nova cidade
+                statusMsg.innerHTML = `<span class='success'>✅ ${name} importada com sucesso!</span>`;
+                loadMap(); // Atualiza o mapa
             } else {
-                alert("Erro ao importar cidade.");
+                const err = await res.json();
+                statusMsg.innerHTML = `<span class='error'>❌ Erro: ${err.detail || 'Falha na API'}</span>`;
             }
         } catch (e) {
-            console.error(e);
+            statusMsg.innerHTML = "<span class='error'>❌ Erro de conexão</span>";
         } finally {
             loading.style.display = 'none';
         }

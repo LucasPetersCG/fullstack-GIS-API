@@ -42,29 +42,47 @@ class IbgeDemographicsService:
                 return 0
 
     async def fetch_all_cities_catalog(self) -> List[Dict]:
-        """
-        Baixa a lista de TODOS os municípios do Brasil (Nome + ID + UF).
-        Usado para popular o autocomplete do frontend.
-        API Localidades v1.
-        """
-        url = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            logger.info("📚 Baixando catálogo completo de municípios...")
-            response = await client.get(url)
+            """
+            Baixa a lista de TODOS os municípios do Brasil (Nome + ID + UF).
+            Versão Blindada contra inconsistências da API do IBGE.
+            """
+            url = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"
             
-            if response.status_code != 200:
-                logger.error("Falha ao baixar catálogo de cidades.")
-                return []
+            # Timeout aumentado para 60s (lista é grande)
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                logger.info("📚 Baixando catálogo completo de municípios...")
+                try:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                except Exception as e:
+                    logger.error(f"Erro de conexão com IBGE: {e}")
+                    return [] # Retorna lista vazia em vez de quebrar
                 
-            # A API retorna: [{'id': 1100015, 'nome': 'Alta Floresta...', 'microrregiao': {'mesorregiao': {'UF': {'sigla': 'RO'}}}}]
-            raw_data = response.json()
-            
-            catalog = []
-            for item in raw_data:
-                catalog.append({
-                    "code": str(item["id"]),
-                    "name": item["nome"],
-                    "uf": item["microrregiao"]["mesorregiao"]["UF"]["sigla"]
-                })
-            
-            return catalog
+                raw_data = response.json()
+                
+                catalog = []
+                for item in raw_data:
+                    try:
+                        # Navegação Segura:
+                        # Usa .get() e "or {}" para garantir que nunca tentamos acessar chaves em None
+                        # Ex: Se microrregiao for None, usa {}, e o próximo .get falha suavemente
+                        micro = item.get("microrregiao") or {}
+                        meso = micro.get("mesorregiao") or {}
+                        uf_obj = meso.get("UF") or {}
+                        
+                        # Se falhar tudo, tenta pegar a UF direto (alguns endpoints retornam diferente)
+                        # ou define 'BR' como fallback
+                        uf_sigla = uf_obj.get("sigla", "BR")
+
+                        catalog.append({
+                            "code": str(item["id"]),
+                            "name": item["nome"],
+                            "uf": uf_sigla
+                        })
+                    except Exception as e:
+                        # Loga o erro mas NÃO PARA O LOOP. Pula apenas essa cidade.
+                        logger.warning(f"Ignorando cidade mal formatada ID {item.get('id')}: {e}")
+                        continue
+                
+                logger.info(f"Catálogo processado: {len(catalog)} cidades encontradas.")
+                return catalog

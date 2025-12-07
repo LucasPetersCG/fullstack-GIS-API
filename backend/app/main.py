@@ -70,3 +70,4 @@ async def get_map_data(db: AsyncSession = Depends(get_db)):
 
 # --- FRONTEND ---
 app.mount("/view", StaticFiles(directory="/frontend", html=True), name="frontend")
+app.mount("/login", StaticFiles(directory="/frontend", html=True), name="login")

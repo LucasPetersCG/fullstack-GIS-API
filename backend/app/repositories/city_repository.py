@@ -14,39 +14,60 @@ class CityRepository:
         self.db = db
 
     async def save_city(self, gdf: gpd.GeoDataFrame, population: int):
-        """
-        Salva ou Atualiza um Município na tabela 'cities'.
-        """
-        if gdf.empty:
-            return
+            """
+            Salva ou Atualiza um Município na tabela 'cities'.
+            CORREÇÃO: Força Cast para MultiPolygon usando ST_Multi().
+            """
+            if gdf.empty:
+                return
 
-        # Pega a primeira linha (assumindo que o GeoDataFrame é de uma única cidade)
-        row = gdf.iloc[0]
-        city_code = str(row["code"])
-        
-        # Pega o nome do município se a malha trouxer, senão usa padrão
-        city_name = row.get("NM_MUN", "Desconhecido")
-        
-        logger.info(f"💾 Persistindo cidade {city_code} ({population} hab)...")
+            row = gdf.iloc[0]
+            city_code = str(row["code"])
+            
+            # Pega o nome do município (O IBGE costuma mandar 'NM_MUN')
+            # Se não vier, usamos um placeholder temporário, mas o catálogo já tem o nome certo.
+            city_name = row.get("NM_MUN", "Desconhecido")
+            
+            logger.info(f"💾 Persistindo cidade {city_code} ({population} hab)...")
 
-        # Upsert (Inserir, se existir atualiza)
-        stmt = insert(City).values(
-            code=city_code,
-            name=city_name,
-            uf=row.get("SIGLA_UF", "BR"), # API malhas as vezes traz, as vezes não.
-            population=population,
-            geom=row["geometry"].wkt
-        ).on_conflict_do_update(
-            index_elements=['code'],
-            set_={
-                "population": population, 
-                "geom": row["geometry"].wkt,
-                "name": city_name
-            }
-        )
-        
-        await self.db.execute(stmt)
-        await self.db.commit()
+            # TRUQUE GIS: ST_Multi() converte Polygon em MultiPolygon automaticamente
+            # Precisamos usar 'func' do SQLAlchemy ou raw text para injetar a função
+            from sqlalchemy import text
+            
+            # Como o SQLAlchemy Async + GeoAlchemy2 tem peculiaridades com funções em INSERT,
+            # vamos garantir que o WKT seja passado e o banco converta.
+            
+            # Estratégia: Se a geometria for POLYGON, o GeoPandas exporta "POLYGON((...))".
+            # O PostGIS rejeita isso numa coluna MULTI.
+            # Vamos converter no Python mesmo, é mais seguro com GeoPandas.
+            
+            # FORÇAR MULTIPOLYGON NO PYTHON
+            from shapely.geometry import Polygon, MultiPolygon
+            geom = row["geometry"]
+            if isinstance(geom, Polygon):
+                geom = MultiPolygon([geom])
+                
+            wkt_geometry = geom.wkt
+
+            # Upsert
+            stmt = insert(City).values(
+                code=city_code,
+                name=city_name,
+                uf=row.get("SIGLA_UF", "BR"),
+                population=population,
+                geom=wkt_geometry # Agora garantimos que é um texto MULTIPOLYGON(...)
+            ).on_conflict_do_update(
+                index_elements=['code'],
+                set_={
+                    "population": population, 
+                    "geom": wkt_geometry,
+                    "name": city_name
+                }
+            )
+            
+            await self.db.execute(stmt)
+            await self.db.commit()
+            logger.info(f"✅ Cidade {city_code} salva com sucesso!")
 
     async def update_catalog(self, cities_list: list):
         """

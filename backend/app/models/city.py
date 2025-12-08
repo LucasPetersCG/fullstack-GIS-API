@@ -18,7 +18,9 @@ class City(Base):
     # --- NOVOS CAMPOS ECONÔMICOS ---
     pib_total = Column(Float, nullable=True)       # PIB (Mil Reais)
     pib_per_capita = Column(Float, nullable=True)  # PIB per Capita (Reais)
+    pib_year = Column(Integer, nullable=True)
     total_companies = Column(Integer, nullable=True) # CEMPRE: Unidades locais
+    companies_year = Column(Integer, nullable=True)
     total_workers = Column(Integer, nullable=True)   # CEMPRE: Pessoal ocupado
     
     geom = Column(Geometry("MULTIPOLYGON", srid=4326, spatial_index=True), nullable=True)

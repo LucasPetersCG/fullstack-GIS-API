@@ -68,19 +68,13 @@ class IbgeEtlOrchestrator:
             "population": population,
             "pib_total": pib_total,
             "pib_per_capita": pib_per_capita,
+            "pib_year": int(pib_year) if pib_year else None,
             "total_companies": company_stats["total_companies"],
-            "total_workers": company_stats["total_workers"]
+            "total_workers": company_stats["total_workers"],
+            "companies_year": company_stats["year"]
         }
         
         await self.repo.save_full_city_data(gdf, city_data, districts_list)
         
         # Retorna metadados extras para o Frontend (Via resposta do Import)
-        return {
-            "status": "success", 
-            "city": city_name, 
-            "data": city_data,
-            "metadata": {
-                "pib_year": pib_year,
-                "companies_year": company_stats["year"]
-            }
-        }
+        return {"status": "success", "city": gdf["NM_MUN"].iloc[0], "data": city_data}

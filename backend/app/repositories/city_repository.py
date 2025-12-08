@@ -18,32 +18,39 @@ class CityRepository:
         if gdf.empty: return
 
         row = gdf.iloc[0]
-        city_code = str(row["code"])
-        city_name = row.get("NM_MUN", "Desconhecido")
         
-        logger.info(f"💾 Persistindo {city_name} (Pop: {data['population']}, PIB: {data['pib_total']})...")
+        # CORREÇÃO: Definição explícita das variáveis
+        city_code = str(row["code"])
+        
+        # Lógica de Nome: Prioriza o nome vindo do Orchestrator (data['city']) se existir, 
+        # senão pega do shapefile, senão desconhecido.
+        # Mas note que no orchestrator passamos data={population...}. O nome não está dentro de data.
+        # O nome está no row['NM_MUN'] ou podemos ter passado no data?
+        # Vamos confiar no row.get("NM_MUN") ou row.get("name") que o geometry.py padronizou.
+        city_name = row.get("NM_MUN") or row.get("name") or "Desconhecido"
+        
+        logger.info(f"💾 Persistindo {city_name} ({city_code})...")
 
-        # --- CORREÇÃO DE GEOMETRIA (CASTING) ---
+        # Casting de Geometria
         from shapely.geometry import Polygon, MultiPolygon
         geom = row["geometry"]
         if isinstance(geom, Polygon):
-            geom = MultiPolygon([geom]) # Converte para MultiPolygon
-            
-        wkt = geom.wkt # Agora é garantido ser MULTIPOLYGON(...)
-        # ----------------------------------------
+            geom = MultiPolygon([geom])
+        wkt = geom.wkt 
 
-        # Upsert na Tabela CITIES
+        # Upsert
         stmt = insert(City).values(
             code=city_code,
             name=city_name,
             uf=row.get("SIGLA_UF", "BR"),
             geom=wkt,
-            # Campos de Dados
             population=data["population"],
             pib_total=data["pib_total"],
             pib_per_capita=data["pib_per_capita"],
+            pib_year=data["pib_year"],
             total_companies=data["total_companies"],
-            total_workers=data["total_workers"]
+            total_workers=data["total_workers"],
+            companies_year=data["companies_year"]
         ).on_conflict_do_update(
             index_elements=['code'],
             set_={
@@ -52,19 +59,19 @@ class CityRepository:
                 "population": data["population"],
                 "pib_total": data["pib_total"],
                 "pib_per_capita": data["pib_per_capita"],
+                "pib_year": data["pib_year"],
                 "total_companies": data["total_companies"],
-                "total_workers": data["total_workers"]
+                "total_workers": data["total_workers"],
+                "companies_year": data["companies_year"]
             }
         )
         
-        # Executa e retorna o ID
         result = await self.db.execute(stmt.returning(City.id))
         city_id = result.scalar()
         
-        # 2. Atualizar Distritos
+        # Atualizar Distritos
         if districts and city_id:
             await self.db.execute(delete(District).where(District.city_id == city_id))
-            
             districts_to_insert = []
             for d in districts:
                 districts_to_insert.append({
@@ -72,13 +79,12 @@ class CityRepository:
                     "name": d["nome"],
                     "city_id": city_id
                 })
-            
             if districts_to_insert:
                 await self.db.execute(insert(District), districts_to_insert)
         
         await self.db.commit()
-        logger.info(f"✅ Cidade {city_name} atualizada com {len(districts)} distritos.")
-    
+        logger.info(f"✅ Dados salvos com sucesso.")
+        
     async def update_catalog(self, cities_list: list):
         """
         Atualiza o catálogo completo de cidades (Autocomplete).
@@ -100,9 +106,11 @@ class CityRepository:
         await self.db.commit()
 
     async def get_all_features(self):
+        """Retorna GeoJSON com TODOS os dados para o mapa."""
         stmt = select(
             City.code, City.name, City.population, 
-            City.pib_per_capita, City.total_companies, # Novos campos
+            City.pib_per_capita, City.pib_year,
+            City.total_companies, City.total_workers, City.companies_year,
             func.ST_AsGeoJSON(City.geom).label("geojson")
         )
         result = await self.db.execute(stmt)
@@ -114,11 +122,13 @@ class CityRepository:
                 "geometry": json.loads(row.geojson),
                 "properties": {
                     "code": row.code,
-                    "name": row.name,
+                    "name": row.name, # Isso resolve o "undefined" no tooltip
                     "population": row.population,
-                    # Tratamento de nulos para o frontend
                     "pib_per_capita": row.pib_per_capita or 0,
-                    "total_companies": row.total_companies or 0
+                    "pib_year": row.pib_year,
+                    "total_companies": row.total_companies or 0,
+                    "total_workers": row.total_workers or 0,
+                    "companies_year": row.companies_year
                 }
             })
         return features

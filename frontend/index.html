@@ -71,7 +71,7 @@
             <div class="metric-value" id="val-companies">-</div>
         </div>
         <div class="metric-card" style="border-left-color: #17a2b8;">
-            <div class="metric-title">Pessoal Ocupado</div>
+            <div class="metric-title">População Empregada</div>
             <div class="metric-value" id="val-workers">-</div>
         </div>
         <hr>
@@ -114,15 +114,19 @@
             weight: 2, opacity: 1, color: 'white', dashArray: '3', fillOpacity: 0.7
         }),
         onEachFeature: (feature, layer) => {
-            // Tooltip simples no hover
-            layer.bindTooltip(`<b>${feature.properties.name}</b>`, {direction: 'top'});
+            // CORREÇÃO TOOLTIP: Usa feature.properties.name vindo do banco
+            layer.bindTooltip(`<b>${feature.properties.name}</b>`, {
+                direction: 'top',
+                permanent: false,
+                opacity: 0.9
+            });
             
-            // Ação de Click
+            // CORREÇÃO CLICK: Passa os dados para a sidebar
             layer.on('click', () => {
-                // Passa as propriedades JÁ carregadas para a sidebar
-                // Isso corrige o "undefined" instantaneamente
                 updateSidebar(feature.properties);
                 toggleSidebar(true);
+                // Opcional: Zoom ao clicar
+                // map.fitBounds(layer.getBounds());
             });
         }
     }).addTo(map);
@@ -141,23 +145,33 @@
     }
 
     function updateSidebar(props) {
-        // CORREÇÃO: Usa o nome que veio do banco/mapa
         document.getElementById('city-title').innerText = props.name || "Cidade";
         
-        // Formatações
-        document.getElementById('val-pop').innerText = (props.population || 0).toLocaleString('pt-BR');
+        // Helper para mostrar ano: (2021) ou vazio
+        const showYear = (y) => y ? `(${y})` : '';
+
+        // População (Ano fixo 2022 Censo)
+        document.getElementById('val-pop').innerHTML = `
+            ${(props.population || 0).toLocaleString('pt-BR')} 
+            <small style='font-size:0.6em; color:#777'>(2022)</small>`;
         
-        const pib = props.pib_per_capita || 0;
-        document.getElementById('val-pib').innerText = pib.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
+        // PIB
+        const pib = (props.pib_per_capita || 0).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
+        document.getElementById('val-pib').innerHTML = `
+            ${pib} 
+            <small style='font-size:0.6em; color:#777'>${showYear(props.pib_year)}</small>`;
         
-        document.getElementById('val-companies').innerText = (props.total_companies || 0).toLocaleString('pt-BR');
+        // Empresas
+        const comp = (props.total_companies || 0).toLocaleString('pt-BR');
+        document.getElementById('val-companies').innerHTML = `
+            ${comp} 
+            <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
         
-        const workers = props.total_workers || 0;
-        document.getElementById('val-workers').innerText = workers.toLocaleString('pt-BR');
-        
-        // Exibição dos Anos (Hardcoded visualmente por enquanto ou dinâmico se salvássemos no banco)
-        // Como não salvamos o "ano" no banco ainda (apenas o valor), mostraremos uma mensagem genérica ou o dado do import
-        // Futuramente: Adicionar coluna 'metadata_years' no banco.
+        // Trabalhadores (Renomeado para População Empregada)
+        const work = (props.total_workers || 0).toLocaleString('pt-BR');
+        document.getElementById('val-workers').innerHTML = `
+            ${work} 
+            <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
     }
 
     // --- CARGA INICIAL ---

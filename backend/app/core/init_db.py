@@ -1,7 +1,7 @@
 # app/core/init_db.py
 import logging
 from app.core.database import engine, Base
-from app.models.city import City, CityCatalog
+from app.models.city import City, CityCatalog, District
 from app.models.user import User
 
 logger = logging.getLogger(__name__)

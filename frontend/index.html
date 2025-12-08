@@ -87,11 +87,22 @@
             weight: 1, opacity: 1, color: 'white', fillOpacity: 0.7
         }),
         onEachFeature: (feature, layer) => {
-            const pop = feature.properties.population.toLocaleString('pt-BR');
+            const p = feature.properties;
+            
+            // Formatações
+            const pop = (p.population || 0).toLocaleString('pt-BR');
+            const pib = (p.pib_per_capita || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+            const empresas = (p.total_companies || 0).toLocaleString('pt-BR');
+
             layer.bindPopup(`
-                <div style="text-align: center;">
-                    <b>${feature.properties.name}</b><br>
-                    <span style="font-size:1.2em; color:#555;">${pop} hab.</span>
+                <div style="text-align:center">
+                    <h3>${p.name}</h3>
+                    <hr style="margin:5px 0; border:0; border-top:1px solid #ccc;">
+                    <div style="text-align:left; line-height:1.6;">
+                        👥 <b>População:</b> ${pop}<br>
+                        💰 <b>PIB per Capita:</b> ${pib}<br>
+                        🏢 <b>Empresas Ativas:</b> ${empresas}
+                    </div>
                 </div>
             `);
         }

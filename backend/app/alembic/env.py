@@ -17,7 +17,7 @@ from app.core.database import Base
 from app.core.config import settings
 # Importar TODOS os modelos para o autogenerate funcionar
 from app.models.user import User
-from app.models.city import City, CityCatalog
+from app.models.city import City, CityCatalog, District
 
 config = context.config
 
@@ -42,7 +42,7 @@ def include_object(object, name, type_, reflected, compare_to):
     # Lista de tabelas do NOSSO sistema (White List)
     # Se a tabela não estiver aqui, o Alembic deve ignorá-la.
     # alembic_version é a tabela interna do próprio alembic.
-    my_tables = ["users", "cities", "city_catalog", "alembic_version"]
+    my_tables = ["users", "cities", "city_catalog", "districts", "alembic_version"]
     
     if type_ == "table":
         # Se a tabela NÃO estiver na nossa lista, IGNORE.

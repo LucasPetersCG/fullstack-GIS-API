@@ -2,7 +2,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, delete
 from sqlalchemy.dialects.postgresql import insert
-from app.models.city import City, CityCatalog
+from app.models.city import City, CityCatalog, District
 import geopandas as gpd
 import json
 import logging
@@ -13,62 +13,72 @@ class CityRepository:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def save_city(self, gdf: gpd.GeoDataFrame, population: int):
-            """
-            Salva ou Atualiza um Município na tabela 'cities'.
-            CORREÇÃO: Força Cast para MultiPolygon usando ST_Multi().
-            """
-            if gdf.empty:
-                return
+    async def save_full_city_data(self, gdf: gpd.GeoDataFrame, data: dict, districts: list):
+        """Salva Cidade Completa + Lista de Distritos."""
+        if gdf.empty: return
 
-            row = gdf.iloc[0]
-            city_code = str(row["code"])
-            
-            # Pega o nome do município (O IBGE costuma mandar 'NM_MUN')
-            # Se não vier, usamos um placeholder temporário, mas o catálogo já tem o nome certo.
-            city_name = row.get("NM_MUN", "Desconhecido")
-            
-            logger.info(f"💾 Persistindo cidade {city_code} ({population} hab)...")
+        row = gdf.iloc[0]
+        city_code = str(row["code"])
+        city_name = row.get("NM_MUN", "Desconhecido")
+        
+        logger.info(f"💾 Persistindo {city_name} (Pop: {data['population']}, PIB: {data['pib_total']})...")
 
-            # TRUQUE GIS: ST_Multi() converte Polygon em MultiPolygon automaticamente
-            # Precisamos usar 'func' do SQLAlchemy ou raw text para injetar a função
-            from sqlalchemy import text
+        # --- CORREÇÃO DE GEOMETRIA (CASTING) ---
+        from shapely.geometry import Polygon, MultiPolygon
+        geom = row["geometry"]
+        if isinstance(geom, Polygon):
+            geom = MultiPolygon([geom]) # Converte para MultiPolygon
             
-            # Como o SQLAlchemy Async + GeoAlchemy2 tem peculiaridades com funções em INSERT,
-            # vamos garantir que o WKT seja passado e o banco converta.
-            
-            # Estratégia: Se a geometria for POLYGON, o GeoPandas exporta "POLYGON((...))".
-            # O PostGIS rejeita isso numa coluna MULTI.
-            # Vamos converter no Python mesmo, é mais seguro com GeoPandas.
-            
-            # FORÇAR MULTIPOLYGON NO PYTHON
-            from shapely.geometry import Polygon, MultiPolygon
-            geom = row["geometry"]
-            if isinstance(geom, Polygon):
-                geom = MultiPolygon([geom])
-                
-            wkt_geometry = geom.wkt
+        wkt = geom.wkt # Agora é garantido ser MULTIPOLYGON(...)
+        # ----------------------------------------
 
-            # Upsert
-            stmt = insert(City).values(
-                code=city_code,
-                name=city_name,
-                uf=row.get("SIGLA_UF", "BR"),
-                population=population,
-                geom=wkt_geometry # Agora garantimos que é um texto MULTIPOLYGON(...)
-            ).on_conflict_do_update(
-                index_elements=['code'],
-                set_={
-                    "population": population, 
-                    "geom": wkt_geometry,
-                    "name": city_name
-                }
-            )
+        # Upsert na Tabela CITIES
+        stmt = insert(City).values(
+            code=city_code,
+            name=city_name,
+            uf=row.get("SIGLA_UF", "BR"),
+            geom=wkt,
+            # Campos de Dados
+            population=data["population"],
+            pib_total=data["pib_total"],
+            pib_per_capita=data["pib_per_capita"],
+            total_companies=data["total_companies"],
+            total_workers=data["total_workers"]
+        ).on_conflict_do_update(
+            index_elements=['code'],
+            set_={
+                "name": city_name,
+                "geom": wkt,
+                "population": data["population"],
+                "pib_total": data["pib_total"],
+                "pib_per_capita": data["pib_per_capita"],
+                "total_companies": data["total_companies"],
+                "total_workers": data["total_workers"]
+            }
+        )
+        
+        # Executa e retorna o ID
+        result = await self.db.execute(stmt.returning(City.id))
+        city_id = result.scalar()
+        
+        # 2. Atualizar Distritos
+        if districts and city_id:
+            await self.db.execute(delete(District).where(District.city_id == city_id))
             
-            await self.db.execute(stmt)
-            await self.db.commit()
-            logger.info(f"✅ Cidade {city_code} salva com sucesso!")
-
+            districts_to_insert = []
+            for d in districts:
+                districts_to_insert.append({
+                    "code": str(d["id"]),
+                    "name": d["nome"],
+                    "city_id": city_id
+                })
+            
+            if districts_to_insert:
+                await self.db.execute(insert(District), districts_to_insert)
+        
+        await self.db.commit()
+        logger.info(f"✅ Cidade {city_name} atualizada com {len(districts)} distritos.")
+    
     async def update_catalog(self, cities_list: list):
         """
         Atualiza o catálogo completo de cidades (Autocomplete).
@@ -90,9 +100,9 @@ class CityRepository:
         await self.db.commit()
 
     async def get_all_features(self):
-        """Retorna GeoJSON de todas as cidades salvas na tabela 'cities'."""
         stmt = select(
-            City.code, City.name, City.population,
+            City.code, City.name, City.population, 
+            City.pib_per_capita, City.total_companies, # Novos campos
             func.ST_AsGeoJSON(City.geom).label("geojson")
         )
         result = await self.db.execute(stmt)
@@ -105,7 +115,10 @@ class CityRepository:
                 "properties": {
                     "code": row.code,
                     "name": row.name,
-                    "population": row.population
+                    "population": row.population,
+                    # Tratamento de nulos para o frontend
+                    "pib_per_capita": row.pib_per_capita or 0,
+                    "total_companies": row.total_companies or 0
                 }
             })
         return features

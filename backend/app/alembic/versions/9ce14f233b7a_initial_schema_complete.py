@@ -1,8 +1,8 @@
-"""Initial cities schema
+"""Initial schema complete
 
-Revision ID: 9511185c673e
+Revision ID: 9ce14f233b7a
 Revises: 
-Create Date: 2025-11-30 21:43:20.957496
+Create Date: 2025-12-08 18:20:47.594396
 
 """
 from alembic import op
@@ -11,7 +11,7 @@ import geoalchemy2
 
 
 # revision identifiers, used by Alembic.
-revision = '9511185c673e'
+revision = '9ce14f233b7a'
 down_revision = None
 branch_labels = None
 depends_on = None

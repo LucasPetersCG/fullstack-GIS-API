@@ -14,6 +14,7 @@ from app.schemas.geo import FeatureCollection
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.routers import auth
+from app.services.ibge.topology import IbgeTopologyService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -67,6 +68,15 @@ async def get_map_data(db: AsyncSession = Depends(get_db)):
     repo = CityRepository(db)
     features = await repo.get_all_features()
     return {"type": "FeatureCollection", "features": features}
+
+@app.get("/probe/districts/{city_code}")
+async def probe_districts(city_code: str, current_user: User = Depends(get_current_user)):
+    """
+    Rota de Diagnóstico: Verifica o que o IBGE tem de dados
+    para Distritos e Subdistritos desta cidade.
+    """
+    service = IbgeTopologyService()
+    return await service.probe_hierarchy(city_code)
 
 # --- FRONTEND ---
 app.mount("/view", StaticFiles(directory="/frontend", html=True), name="frontend")

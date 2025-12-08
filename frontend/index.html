@@ -2,109 +2,128 @@
 <html lang="pt-br">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Geo-Insights Brasil</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
-        body { margin: 0; font-family: sans-serif; overflow: hidden; }
-        #map { height: 100vh; width: 100%; z-index: 1; }
+        body { margin: 0; font-family: 'Inter', sans-serif; overflow: hidden; display: flex; }
         
-        /* UI Flutuante */
-        .ui-container {
-            position: absolute; top: 20px; left: 60px; z-index: 1000;
-            background: white; padding: 15px; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 320px;
+        /* SIDEBAR (Painel Lateral) */
+        #sidebar {
+            width: 350px; height: 100vh; background: #fff; 
+            box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 2000;
+            display: flex; flex-direction: column;
+            transform: translateX(-360px); /* Escondido por padrão */
+            transition: transform 0.3s ease-in-out;
+            position: absolute; left: 0; top: 0;
         }
-        .header-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; }
-        h3 { margin: 0; font-size: 1.1rem; color: #333; }
+        #sidebar.active { transform: translateX(0); }
         
-        /* Botão de Auth */
-        .auth-btn { font-size: 0.8rem; padding: 5px 10px; border: 1px solid #ccc; background: #f8f9fa; border-radius: 4px; cursor: pointer; text-decoration: none; color: #333; }
-        .auth-btn:hover { background: #e2e6ea; }
-        .logout { color: #dc3545; border-color: #dc3545; color: white; background: #dc3545; }
+        .sidebar-header { padding: 20px; background: #007bff; color: white; display: flex; justify-content: space-between; align-items: center; }
+        .sidebar-content { padding: 20px; overflow-y: auto; flex: 1; }
+        .close-btn { cursor: pointer; font-size: 1.5rem; background: none; border: none; color: white; }
+
+        /* CARD DE MÉTRICAS */
+        .metric-card { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #007bff; }
+        .metric-title { font-size: 0.85rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+        .metric-value { font-size: 1.5rem; font-weight: 600; color: #333; margin-top: 5px; }
         
-        input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 4px; }
-        #suggestions { max-height: 250px; overflow-y: auto; border: 1px solid #eee; display: none; background: white; margin-top: 5px; box-shadow: 0 4px 6px rgba(0,0,0,0.05); }
-        .suggestion-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; font-size: 0.9rem; }
-        .suggestion-item:hover { background-color: #f0f8ff; color: #0056b3; }
-        
-        .loading { color: #007bff; font-size: 0.9em; display: none; margin-top: 10px; text-align: center; }
-        .status-msg { font-size: 0.85em; margin-top: 10px; text-align: center; }
-        .success { color: green; } .error { color: red; }
+        /* BARRA DE BUSCA (Flutuante) */
+        .search-container {
+            position: absolute; top: 20px; left: 60px; z-index: 1000;
+            background: white; padding: 10px; border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px;
+            transition: left 0.3s;
+        }
+        #sidebar.active ~ .search-container { left: 370px; } /* Empurra a busca se sidebar abrir */
+
+        /* MAPA */
+        #map { flex: 1; height: 100vh; }
+
+        /* UTILS */
+        input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        #suggestions { max-height: 200px; overflow-y: auto; background: white; border: 1px solid #eee; display: none; }
+        .suggestion-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
+        .suggestion-item:hover { background: #f0f8ff; }
+        .loading { display: none; color: #007bff; font-size: 0.9em; margin-top: 5px; }
+        .auth-btn { float: right; font-size: 0.8em; text-decoration: none; color: #555; }
     </style>
 </head>
 <body>
 
-<div class="ui-container">
-    <div class="header-row">
-        <h3>Explorador de Municípios</h3>
-        <a id="authBtn" class="auth-btn" href="/login">Login</a>
+<!-- SIDEBAR -->
+<div id="sidebar">
+    <div class="sidebar-header">
+        <h2 id="city-title" style="margin:0;">Detalhes</h2>
+        <button class="close-btn" onclick="toggleSidebar()">×</button>
     </div>
-    
-    <input type="text" id="search" placeholder="Buscar cidade (ex: Ouro Preto)..." autocomplete="off">
-    <div id="suggestions"></div>
-    
-    <div id="loading" class="loading">
-        🔄 Conectando ao IBGE...<br><small>Isso pode levar alguns segundos.</small>
+    <div class="sidebar-content">
+        <div class="metric-card">
+            <div class="metric-title">População (2022)</div>
+            <div class="metric-value" id="val-pop">-</div>
+        </div>
+        <div class="metric-card" style="border-left-color: #28a745;">
+            <div class="metric-title">PIB per Capita</div>
+            <div class="metric-value" id="val-pib">-</div>
+        </div>
+        <div class="metric-card" style="border-left-color: #ffc107;">
+            <div class="metric-title">Empresas Ativas</div>
+            <div class="metric-value" id="val-companies">-</div>
+        </div>
+        <div class="metric-card" style="border-left-color: #17a2b8;">
+            <div class="metric-title">Pessoal Ocupado</div>
+            <div class="metric-value" id="val-workers">-</div>
+        </div>
+        <hr>
+        <small style="color:#999;">Fonte: IBGE (Censo 2022, SIDRA, Malhas).</small>
     </div>
-    <div id="statusMsg" class="status-msg"></div>
 </div>
 
+<!-- BUSCA -->
+<div class="search-container">
+    <div style="margin-bottom: 5px;">
+        <strong>Geo-Insights</strong>
+        <a id="authBtn" class="auth-btn" href="/view/login.html">Login</a>
+    </div>
+    <input type="text" id="search" placeholder="Buscar município..." autocomplete="off">
+    <div id="suggestions"></div>
+    <div id="loading" class="loading">🔄 Importando dados...</div>
+</div>
+
+<!-- MAPA -->
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- 1. Gerenciamento de Auth ---
+    // --- AUTH UI ---
+    const token = localStorage.getItem('geo_token');
     const authBtn = document.getElementById('authBtn');
-    
-    function updateAuthUI() {
-        const token = localStorage.getItem('geo_token');
-        if (token) {
-            authBtn.innerText = "Sair (Logout)";
-            authBtn.classList.add("logout");
-            authBtn.href = "#";
-            authBtn.onclick = (e) => {
-                e.preventDefault();
-                localStorage.removeItem('geo_token');
-                window.location.reload();
-            };
-        } else {
-            authBtn.innerText = "Login (Admin)";
-            authBtn.classList.remove("logout");
-            authBtn.href = "/view/login.html";
-            authBtn.onclick = null;
-        }
+    if (token) {
+        authBtn.innerText = "Sair";
+        authBtn.href = "#";
+        authBtn.onclick = () => { localStorage.removeItem('geo_token'); window.location.reload(); };
     }
-    updateAuthUI();
 
-    // --- 2. Mapa Leaflet ---
+    // --- MAPA ---
     const map = L.map('map').setView([-15.7, -47.8], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
 
     let citiesLayer = L.geoJSON(null, {
         style: (feature) => ({
             fillColor: getColor(feature.properties.population),
-            weight: 1, opacity: 1, color: 'white', fillOpacity: 0.7
+            weight: 2, opacity: 1, color: 'white', dashArray: '3', fillOpacity: 0.7
         }),
         onEachFeature: (feature, layer) => {
-            const p = feature.properties;
+            // Tooltip simples no hover
+            layer.bindTooltip(`<b>${feature.properties.name}</b>`, {direction: 'top'});
             
-            // Formatações
-            const pop = (p.population || 0).toLocaleString('pt-BR');
-            const pib = (p.pib_per_capita || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-            const empresas = (p.total_companies || 0).toLocaleString('pt-BR');
-
-            layer.bindPopup(`
-                <div style="text-align:center">
-                    <h3>${p.name}</h3>
-                    <hr style="margin:5px 0; border:0; border-top:1px solid #ccc;">
-                    <div style="text-align:left; line-height:1.6;">
-                        👥 <b>População:</b> ${pop}<br>
-                        💰 <b>PIB per Capita:</b> ${pib}<br>
-                        🏢 <b>Empresas Ativas:</b> ${empresas}
-                    </div>
-                </div>
-            `);
+            // Ação de Click
+            layer.on('click', () => {
+                // Passa as propriedades JÁ carregadas para a sidebar
+                // Isso corrige o "undefined" instantaneamente
+                updateSidebar(feature.properties);
+                toggleSidebar(true);
+            });
         }
     }).addTo(map);
 
@@ -113,84 +132,107 @@
                d > 10000 ? '#FD8D3C' : '#FEB24C';
     }
 
+    // --- SIDEBAR LOGIC ---
+    const sidebar = document.getElementById('sidebar');
+    
+    function toggleSidebar(show) {
+        if (show) sidebar.classList.add('active');
+        else sidebar.classList.remove('active');
+    }
+
+    function updateSidebar(props) {
+        // CORREÇÃO: Usa o nome que veio do banco/mapa
+        document.getElementById('city-title').innerText = props.name || "Cidade";
+        
+        // Formatações
+        document.getElementById('val-pop').innerText = (props.population || 0).toLocaleString('pt-BR');
+        
+        const pib = props.pib_per_capita || 0;
+        document.getElementById('val-pib').innerText = pib.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
+        
+        document.getElementById('val-companies').innerText = (props.total_companies || 0).toLocaleString('pt-BR');
+        
+        const workers = props.total_workers || 0;
+        document.getElementById('val-workers').innerText = workers.toLocaleString('pt-BR');
+        
+        // Exibição dos Anos (Hardcoded visualmente por enquanto ou dinâmico se salvássemos no banco)
+        // Como não salvamos o "ano" no banco ainda (apenas o valor), mostraremos uma mensagem genérica ou o dado do import
+        // Futuramente: Adicionar coluna 'metadata_years' no banco.
+    }
+
+    // --- CARGA INICIAL ---
     async function loadMap() {
         try {
             const res = await fetch('/map');
             const data = await res.json();
             citiesLayer.clearLayers();
             citiesLayer.addData(data);
-            if (data.features.length > 0) {
-                // Foca apenas se tiver dados, senão mantém visão Brasil
-                const group = new L.featureGroup(citiesLayer.getLayers());
-                map.fitBounds(group.getBounds().pad(0.1));
-            }
-        } catch(e) { console.error("Erro ao carregar mapa", e); }
+        } catch(e) { console.error(e); }
     }
-    loadMap(); // Carrega ao iniciar
+    loadMap();
 
-    // --- 3. Busca e Importação ---
+    // --- BUSCA & IMPORTAÇÃO ---
     const searchInput = document.getElementById('search');
     const suggestions = document.getElementById('suggestions');
     const loading = document.getElementById('loading');
-    const statusMsg = document.getElementById('statusMsg');
 
-    // Debounce para não floodar a API
-    let debounceTimer;
+    let debounce;
     searchInput.addEventListener('input', (e) => {
-        clearTimeout(debounceTimer);
-        const query = e.target.value;
-        statusMsg.innerText = "";
+        clearTimeout(debounce);
+        const q = e.target.value;
+        if(q.length < 3) { suggestions.style.display = 'none'; return; }
         
-        if (query.length < 3) { suggestions.style.display = 'none'; return; }
-
-        debounceTimer = setTimeout(async () => {
-            try {
-                const res = await fetch(`/cities/search?q=${query}`);
-                const list = await res.json();
-                
-                suggestions.innerHTML = '';
-                suggestions.style.display = list.length ? 'block' : 'none';
-                
-                list.forEach(city => {
-                    const div = document.createElement('div');
-                    div.className = 'suggestion-item';
-                    div.innerText = `${city.name} - ${city.uf}`;
-                    div.onclick = () => importCity(city.code, city.name);
-                    suggestions.appendChild(div);
-                });
-            } catch (e) { console.error(e); }
+        debounce = setTimeout(async () => {
+            const res = await fetch(`/cities/search?q=${q}`);
+            const list = await res.json();
+            suggestions.innerHTML = '';
+            suggestions.style.display = list.length ? 'block' : 'none';
+            list.forEach(c => {
+                const div = document.createElement('div');
+                div.className = 'suggestion-item';
+                div.innerText = `${c.name} - ${c.uf}`;
+                div.onclick = () => importCity(c.code);
+                suggestions.appendChild(div);
+            });
         }, 300);
     });
 
-    async function importCity(code, name) {
+    async function importCity(code) {
         suggestions.style.display = 'none';
-        searchInput.value = name;
         loading.style.display = 'block';
-        statusMsg.innerText = "";
-
-        const token = localStorage.getItem('geo_token');
+        
         const headers = token ? { "Authorization": `Bearer ${token}` } : {};
-
+        
         try {
-            const res = await fetch(`/cities/import/${code}`, { 
-                method: 'POST',
-                headers: headers 
-            });
+            const res = await fetch(`/cities/import/${code}`, { method: 'POST', headers: headers });
             
-            if (res.status === 401) {
-                statusMsg.innerHTML = "<span class='error'>🔒 Faça Login para importar dados!</span>";
-                alert("Você precisa estar logado! Clique no botão Login.");
-            } else if (res.ok) {
-                statusMsg.innerHTML = `<span class='success'>✅ ${name} importada com sucesso!</span>`;
-                loadMap(); // Atualiza o mapa
+            if (res.ok) {
+                const responseJson = await res.json();
+                console.log("Resposta Importação:", responseJson);
+                
+                loadMap(); // Recarrega mapa
+                
+                // --- CORREÇÃO AQUI: Atualiza e abre a Sidebar ---
+                // O Backend retorna: { city: "Nome", data: { pib..., pop... }, metadata: {...} }
+                const cityProps = {
+                    name: responseJson.city,
+                    ...responseJson.data // Espalha population, pib_total, etc
+                };
+                
+                updateSidebar(cityProps);
+                toggleSidebar(true);
+                // -----------------------------------------------
+
+            } else if (res.status === 401) {
+                alert("🔒 Faça login para importar!");
             } else {
-                const err = await res.json();
-                statusMsg.innerHTML = `<span class='error'>❌ Erro: ${err.detail || 'Falha na API'}</span>`;
+                alert("Erro ao importar.");
             }
-        } catch (e) {
-            statusMsg.innerHTML = "<span class='error'>❌ Erro de conexão</span>";
-        } finally {
-            loading.style.display = 'none';
+        } catch(e) { 
+            console.error(e); 
+            alert("Erro de conexão.");
+        } finally { 
+            loading.style.display = 'none'; 
         }
     }
 </script>

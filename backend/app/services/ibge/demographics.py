@@ -86,3 +86,23 @@ class IbgeDemographicsService:
                 
                 logger.info(f"Catálogo processado: {len(catalog)} cidades encontradas.")
                 return catalog
+        
+    async def fetch_city_details(self, city_code: str) -> dict:
+        """
+        Busca o nome oficial e UF do município.
+        API Localidades v1.
+        """
+        url = f"https://servicodados.ibge.gov.br/api/v1/localidades/municipios/{city_code}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            try:
+                response = await client.get(url)
+                if response.status_code == 200:
+                    data = response.json()
+                    # Retorna: {'id': 3504107, 'nome': 'Atibaia', 'microrregiao': ...}
+                    return {
+                        "name": data.get("nome"),
+                        "uf": data.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("sigla", "BR")
+                    }
+                return {"name": "Desconhecido", "uf": "BR"}
+            except Exception:
+                return {"name": "Desconhecido", "uf": "BR"}

@@ -1,45 +1,51 @@
 # backend/app/services/ibge/economics.py
 import httpx
 import logging
-from typing import Dict
+from typing import Dict, Tuple, Any
 
 logger = logging.getLogger(__name__)
 
 class IbgeEconomicsService:
     BASE_URL = "https://servicodados.ibge.gov.br/api/v3/agregados"
 
-    async def fetch_pib(self, city_code: str) -> float:
-        """Busca PIB Total (Tabela 5938). Retorna float (Mil Reais)."""
-        # Periodo -1 (Último disponível)
-        url = f"{self.BASE_URL}/5938/periodos/-1/variaveis/37?localidades=N6[{city_code}]"
+    async def fetch_pib(self, city_code: str) -> Tuple[float, str]:
+        """
+        Busca PIB Total (Tabela 5938).
+        Retorna: (Valor em Mil Reais, Ano de Referência)
+        Janela: 2020 a 2025.
+        """
+        # Solicita os últimos 6 anos possíveis
+        url = f"{self.BASE_URL}/5938/periodos/2025|2024|2023|2022|2021|2020/variaveis/37?localidades=N6[{city_code}]"
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=15.0) as client:
             try:
                 resp = await client.get(url)
-                if resp.status_code != 200: return 0.0
+                if resp.status_code != 200: return 0.0, ""
                 
                 data = resp.json()
-                if not data: return 0.0
+                if not data: return 0.0, ""
 
-                # Estrutura: data[0]['resultados'][0]['series'][0]['serie']['ANO']
-                val_dict = data[0]["resultados"][0]["series"][0]["serie"]
-                val = list(val_dict.values())[0] # Pega o valor do ano retornado
+                series = data[0]["resultados"][0]["series"][0]["serie"]
                 
-                return float(val) if val and val not in ["-", "..."] else 0.0
+                # Ordena decrescente para pegar o ano mais recente com valor válido
+                for ano in sorted(series.keys(), reverse=True):
+                    val = series[ano]
+                    if val and val not in ["-", "...", "X"]:
+                        return float(val), ano
+                
+                return 0.0, ""
             except Exception as e:
                 logger.error(f"Erro PIB: {e}")
-                return 0.0
+                return 0.0, ""
 
-    async def fetch_companies_stats(self, city_code: str) -> Dict[str, int]:
+    async def fetch_companies_stats(self, city_code: str) -> Dict[str, Any]:
         """
-        Busca dados de Empresas (CEMPRE - Tabela 1685).
-        Retorna: Total de Unidades Locais e Pessoal Ocupado.
+        Busca dados do CEMPRE (Tabela 1685).
+        Retorna: {total_companies, total_workers, year}
         """
-        # Variável 153 (Unidades locais), 154 (Pessoal ocupado total)
-        # Classificação 12762[0] = Total geral
-        url = f"{self.BASE_URL}/1685/periodos/-1/variaveis/153|154?localidades=N6[{city_code}]&classificacao=12762[0]" 
+        url = f"{self.BASE_URL}/1685/periodos/2025|2024|2023|2022|2021|2020/variaveis/153|154?localidades=N6[{city_code}]&classificacao=12762[0]" 
         
-        stats = {"total_companies": 0, "total_workers": 0}
+        stats = {"total_companies": 0, "total_workers": 0, "year": ""}
         
         async with httpx.AsyncClient(timeout=15.0) as client:
             try:
@@ -48,18 +54,23 @@ class IbgeEconomicsService:
                 
                 data = resp.json()
                 
+                # Precisamos encontrar um ano comum onde ambos os dados existam (idealmente)
+                # Ou pegamos o mais recente de cada um. Vamos tentar pegar o ano mais recente da primeira variável.
+                
                 for item in data:
-                    var_id = item["id"] # "153" ou "154"
-                    try:
-                        val_dict = item["resultados"][0]["series"][0]["serie"]
-                        val_str = list(val_dict.values())[0]
-                        
-                        if val_str and val_str not in ["-", "..."]:
-                            val = int(val_str)
-                            if str(var_id) == "153": stats["total_companies"] = val
-                            if str(var_id) == "154": stats["total_workers"] = val
-                    except:
-                        continue
+                    var_id = str(item["id"])
+                    series = item["resultados"][0]["series"][0]["serie"]
+                    
+                    for ano in sorted(series.keys(), reverse=True):
+                        val = series[ano]
+                        if val and val.isdigit():
+                            if var_id == "153": # Empresas
+                                stats["total_companies"] = int(val)
+                                if not stats["year"]: stats["year"] = ano
+                            elif var_id == "154": # Trabalhadores
+                                stats["total_workers"] = int(val)
+                            break # Achou o mais recente desta variável, para.
+                
                 return stats
             except Exception as e:
                 logger.error(f"Erro CEMPRE: {e}")

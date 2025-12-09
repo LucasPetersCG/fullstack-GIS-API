@@ -30,7 +30,7 @@ class IbgeEconomicsService:
                     url += f"&classificacao={classification}"
                 
                 # Delay para não tomar Ban
-                await asyncio.sleep(0.5) 
+                
                 
                 try:
                     resp = await client.get(url)

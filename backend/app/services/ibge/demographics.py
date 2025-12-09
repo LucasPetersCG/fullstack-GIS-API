@@ -41,7 +41,7 @@ class IbgeDemographicsService:
         async with httpx.AsyncClient(timeout=60.0, headers=self.HEADERS) as client:
             logger.info("📚 Baixando catálogo completo de municípios...")
             try:
-                await asyncio.sleep(1) # Delay anti-bloqueio
+                
                 response = await client.get(url)
                 response.raise_for_status()
                 

@@ -31,49 +31,42 @@ class IbgeEtlOrchestrator:
         return {"status": "success", "total": len(cities_list)}
 
     async def import_city(self, city_code: str):
-        """Importa dados de uma cidade específica."""
         logger.info(f"🚀 Iniciando ETL para {city_code}...")
         
-        # 1. Dados Básicos e Nome Oficial
+        # 1. Busca Dados
         gdf = await self.geo_service.fetch_city_geom(city_code)
         
-        # Busca detalhes para garantir nome oficial correto (evitar "undefined")
+        # Busca Nome Oficial
         details = await self.demo_service.fetch_city_details(city_code)
-        city_name = details.get("name", "Desconhecido")
+        city_name = details.get("name", "Nome não encontrado") # Nome Seguro
+        city_uf = details.get("uf", "BR")
         
         population = await self.demo_service.fetch_city_population(city_code)
         
         if gdf.empty:
-            raise ValueError(f"Cidade {city_code} não encontrada na malha.")
+            raise ValueError(f"Geometria não encontrada.")
 
-        # Injeta metadados no GeoDataFrame para o Repository usar
-        gdf["NM_MUN"] = city_name
-        gdf["SIGLA_UF"] = details.get("uf", "BR")
-
-        # 2. Dados Econômicos (PIB + Empresas)
-        # O fetch_pib retorna (valor, ano)
+        # 2. Economia
         pib_total, pib_year = await self.eco_service.fetch_pib(city_code)
-        
-        # O fetch_companies retorna dict com chaves 'total_companies', 'year', etc
         company_stats = await self.eco_service.fetch_companies_stats(city_code)
         
-        # Cálculo de Derivados
-        pib_per_capita = 0.0
-        if population > 0:
-            pib_per_capita = (pib_total * 1000) / population
+        # Derivados
+        pib_per_capita = (pib_total * 1000) / population if population > 0 else 0
         
-        # 3. Topologia (Distritos)
+        # 3. Topologia
         districts_list = await self.topo_service.fetch_districts(city_code)
         
-        # 4. Montar DTO para Persistência
+        # 4. DTO explícito (Nome vai AQUI, não no GDF)
         city_data = {
+            "name": city_name,  # <--- CORREÇÃO PRINCIPAL
+            "uf": city_uf,
             "population": population,
             "pib_total": pib_total,
             "pib_per_capita": pib_per_capita,
             "pib_year": pib_year,
-            "total_companies": company_stats.get("total_companies", 0),
-            "total_workers": company_stats.get("total_workers", 0),
-            "companies_year": company_stats.get("year", 0)
+            "total_companies": company_stats["total_companies"],
+            "total_workers": company_stats["total_workers"],
+            "companies_year": company_stats["year"]
         }
         
         await self.repo.save_full_city_data(gdf, city_data, districts_list)

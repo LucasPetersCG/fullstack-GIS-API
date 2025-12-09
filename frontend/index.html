@@ -7,38 +7,17 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap" rel="stylesheet">
     <style>
         body { margin: 0; font-family: 'Inter', sans-serif; overflow: hidden; display: flex; }
-        
-        /* SIDEBAR */
-        #sidebar {
-            width: 350px; height: 100vh; background: #fff; 
-            box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 2000;
-            display: flex; flex-direction: column;
-            transform: translateX(-360px); 
-            transition: transform 0.3s ease-in-out;
-            position: absolute; left: 0; top: 0;
-        }
+        #sidebar { width: 350px; height: 100vh; background: #fff; box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 2000; display: flex; flex-direction: column; transform: translateX(-360px); transition: transform 0.3s ease-in-out; position: absolute; left: 0; top: 0; }
         #sidebar.active { transform: translateX(0); }
-        
         .sidebar-header { padding: 20px; background: #007bff; color: white; display: flex; justify-content: space-between; align-items: center; }
         .sidebar-content { padding: 20px; overflow-y: auto; flex: 1; }
         .close-btn { cursor: pointer; font-size: 1.5rem; background: none; border: none; color: white; }
-
-        /* CARDS */
         .metric-card { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #007bff; }
         .metric-title { font-size: 0.85rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
         .metric-value { font-size: 1.5rem; font-weight: 600; color: #333; margin-top: 5px; }
-        
-        /* BUSCA */
-        .search-container {
-            position: absolute; top: 20px; left: 60px; z-index: 1000;
-            background: white; padding: 10px; border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px;
-            transition: left 0.3s;
-        }
-        #sidebar.active ~ .search-container { left: 370px; } 
-
+        .search-container { position: absolute; top: 20px; left: 60px; z-index: 1000; background: white; padding: 10px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px; transition: left 0.3s; }
+        #sidebar.active ~ .search-container { left: 370px; }
         #map { flex: 1; height: 100vh; }
-
         input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         #suggestions { max-height: 200px; overflow-y: auto; background: white; border: 1px solid #eee; display: none; }
         .suggestion-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
@@ -49,15 +28,14 @@
 </head>
 <body>
 
-<!-- SIDEBAR -->
 <div id="sidebar">
     <div class="sidebar-header">
         <h2 id="city-title" style="margin:0;">Detalhes</h2>
-        <button class="close-btn" onclick="toggleSidebar()">×</button>
+        <button class="close-btn" onclick="toggleSidebar(false)">×</button>
     </div>
     <div class="sidebar-content">
         <div class="metric-card">
-            <div class="metric-title">População (2022)</div>
+            <div class="metric-title">População</div>
             <div class="metric-value" id="val-pop">-</div>
         </div>
         <div class="metric-card" style="border-left-color: #28a745;">
@@ -77,7 +55,6 @@
     </div>
 </div>
 
-<!-- BUSCA -->
 <div class="search-container">
     <div style="margin-bottom: 5px;">
         <strong>Geo-Insights</strong>
@@ -92,7 +69,6 @@
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- AUTH ---
     const token = localStorage.getItem('geo_token');
     const authBtn = document.getElementById('authBtn');
     if (token) {
@@ -101,7 +77,6 @@
         authBtn.onclick = () => { localStorage.removeItem('geo_token'); window.location.reload(); };
     }
 
-    // --- MAPA ---
     const map = L.map('map').setView([-15.7, -47.8], 4);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution: '© OSM' }).addTo(map);
 
@@ -112,11 +87,10 @@
         }),
         onEachFeature: (feature, layer) => {
             const props = feature.properties;
-            // Tooltip no Mouse
-            layer.bindTooltip(`<b>${props.name}</b>`, {
-                direction: 'top', permanent: false, opacity: 0.9
-            });
-            // Clique abre Sidebar
+            // Tooltip Robusto
+            const name = props.name || props.NM_MUN || "Cidade";
+            layer.bindTooltip(`<b>${name}</b>`, { direction: 'top', permanent: false, opacity: 0.9 });
+            
             layer.on('click', () => {
                 updateSidebar(props);
                 toggleSidebar(true);
@@ -125,11 +99,9 @@
     }).addTo(map);
 
     function getColor(d) {
-        return d > 500000 ? '#800026' : d > 100000 ? '#BD0026' : d > 50000 ? '#E31A1C' :
-               d > 10000 ? '#FD8D3C' : '#FEB24C';
+        return d > 500000 ? '#800026' : d > 100000 ? '#BD0026' : d > 50000 ? '#E31A1C' : d > 10000 ? '#FD8D3C' : '#FEB24C';
     }
 
-    // --- SIDEBAR UI ---
     const sidebar = document.getElementById('sidebar');
     function toggleSidebar(show) {
         if (show) sidebar.classList.add('active');
@@ -138,7 +110,6 @@
 
     function updateSidebar(props) {
         document.getElementById('city-title').innerText = props.name || "Cidade";
-        
         const showYear = (y) => y ? `(${y})` : '';
         const fmtNum = (n) => (n !== undefined && n !== null) ? n.toLocaleString('pt-BR') : '-';
         const fmtMoney = (n) => (n !== undefined && n !== null) ? n.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}) : '-';
@@ -149,18 +120,24 @@
         document.getElementById('val-workers').innerHTML = `${fmtNum(props.total_workers)} <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
     }
 
-    // --- LOAD MAP ---
     async function loadMap() {
         try {
             const res = await fetch('/map');
             const data = await res.json();
+            
+            // --- DEBUG VISUAL ---
+            console.log("📍 GeoJSON do Backend:", data);
+            if (data.features.length > 0) {
+                console.log("Exemplo de Propriedades:", data.features[0].properties);
+            }
+            // --------------------
+
             citiesLayer.clearLayers();
             citiesLayer.addData(data);
         } catch(e) { console.error(e); }
     }
     loadMap();
 
-    // --- SEARCH ---
     const searchInput = document.getElementById('search');
     const suggestions = document.getElementById('suggestions');
     const loading = document.getElementById('loading');
@@ -172,23 +149,26 @@
         if(q.length < 3) { suggestions.style.display = 'none'; return; }
         
         debounce = setTimeout(async () => {
-            const res = await fetch(`/cities/search?q=${q}`);
-            const list = await res.json();
-            suggestions.innerHTML = '';
-            suggestions.style.display = list.length ? 'block' : 'none';
-            list.forEach(c => {
-                const div = document.createElement('div');
-                div.className = 'suggestion-item';
-                div.innerText = `${c.name} - ${c.uf}`;
-                div.onclick = () => importCity(c.code);
-                suggestions.appendChild(div);
-            });
+            try {
+                const res = await fetch(`/cities/search?q=${q}`);
+                const list = await res.json();
+                suggestions.innerHTML = '';
+                suggestions.style.display = list.length ? 'block' : 'none';
+                list.forEach(c => {
+                    const div = document.createElement('div');
+                    div.className = 'suggestion-item';
+                    div.innerText = `${c.name} - ${c.uf}`;
+                    div.onclick = () => importCity(c.code, c.name); // Passa nome aqui também
+                    suggestions.appendChild(div);
+                });
+            } catch(e) { console.error(e); }
         }, 300);
     });
 
-    async function importCity(code) {
+    async function importCity(code, searchName) {
         suggestions.style.display = 'none';
         loading.style.display = 'block';
+        if(searchName) searchInput.value = searchName;
         
         const headers = token ? { "Authorization": `Bearer ${token}` } : {};
         
@@ -197,21 +177,22 @@
             
             if (res.ok) {
                 const responseJson = await res.json();
-                await loadMap(); // Atualiza o visual do mapa
                 
-                // Abre a sidebar com os dados retornados
+                // 1. Atualiza Sidebar IMEDIATAMENTE (Cache Local)
                 const cityProps = {
                     name: responseJson.city, 
                     ...responseJson.data 
                 };
-                
                 updateSidebar(cityProps);
                 toggleSidebar(true);
+
+                // 2. Atualiza Mapa (Background)
+                await loadMap(); 
 
             } else if (res.status === 401) {
                 alert("🔒 Faça login para importar!");
             } else {
-                alert("Erro ao importar. Tente novamente.");
+                alert("Erro ao importar.");
             }
         } catch(e) { console.error(e); alert("Erro de conexão."); } 
         finally { loading.style.display = 'none'; }

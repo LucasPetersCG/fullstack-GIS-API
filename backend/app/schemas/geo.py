@@ -1,20 +1,32 @@
-# app/schemas/geo.py
+# backend/app/schemas/geo.py
 from pydantic import BaseModel
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 class FeatureProperties(BaseModel):
-    """Atributos não espaciais do setor."""
+    """
+    Define QUAIS dados serão enviados para o Frontend.
+    Se o campo não estiver aqui, o FastAPI remove ele do JSON.
+    """
     code: str
-    population: int
-    # Futuro: renda, densidade, nome_bairro...
+    name: str # <--- OBRIGATÓRIO PARA O TOOLTIP
+    uf: Optional[str] = None
+    
+    population: Optional[int] = 0
+    
+    # Dados Econômicos
+    pib_total: Optional[float] = 0.0
+    pib_per_capita: Optional[float] = 0.0
+    pib_year: Optional[int] = None
+    
+    total_companies: Optional[int] = 0
+    total_workers: Optional[int] = 0
+    companies_year: Optional[int] = None
 
 class Feature(BaseModel):
-    """Estrutura de uma Feature GeoJSON."""
     type: str = "Feature"
-    geometry: Dict[str, Any]  # Onde vai o Polygon/MultiPolygon
-    properties: FeatureProperties
+    geometry: Dict[str, Any]
+    properties: FeatureProperties # <--- Link com a classe acima
 
 class FeatureCollection(BaseModel):
-    """Estrutura Raiz do GeoJSON."""
     type: str = "FeatureCollection"
     features: List[Feature]

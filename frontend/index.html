@@ -8,12 +8,12 @@
     <style>
         body { margin: 0; font-family: 'Inter', sans-serif; overflow: hidden; display: flex; }
         
-        /* SIDEBAR (Painel Lateral) */
+        /* SIDEBAR */
         #sidebar {
             width: 350px; height: 100vh; background: #fff; 
             box-shadow: 2px 0 10px rgba(0,0,0,0.1); z-index: 2000;
             display: flex; flex-direction: column;
-            transform: translateX(-360px); /* Escondido por padrão */
+            transform: translateX(-360px); 
             transition: transform 0.3s ease-in-out;
             position: absolute; left: 0; top: 0;
         }
@@ -23,24 +23,22 @@
         .sidebar-content { padding: 20px; overflow-y: auto; flex: 1; }
         .close-btn { cursor: pointer; font-size: 1.5rem; background: none; border: none; color: white; }
 
-        /* CARD DE MÉTRICAS */
+        /* CARDS */
         .metric-card { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #007bff; }
         .metric-title { font-size: 0.85rem; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
         .metric-value { font-size: 1.5rem; font-weight: 600; color: #333; margin-top: 5px; }
         
-        /* BARRA DE BUSCA (Flutuante) */
+        /* BUSCA */
         .search-container {
             position: absolute; top: 20px; left: 60px; z-index: 1000;
             background: white; padding: 10px; border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15); width: 300px;
             transition: left 0.3s;
         }
-        #sidebar.active ~ .search-container { left: 370px; } /* Empurra a busca se sidebar abrir */
+        #sidebar.active ~ .search-container { left: 370px; } 
 
-        /* MAPA */
         #map { flex: 1; height: 100vh; }
 
-        /* UTILS */
         input { width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
         #suggestions { max-height: 200px; overflow-y: auto; background: white; border: 1px solid #eee; display: none; }
         .suggestion-item { padding: 10px; cursor: pointer; border-bottom: 1px solid #f0f0f0; }
@@ -90,12 +88,11 @@
     <div id="loading" class="loading">🔄 Importando dados...</div>
 </div>
 
-<!-- MAPA -->
 <div id="map"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
-    // --- AUTH UI ---
+    // --- AUTH ---
     const token = localStorage.getItem('geo_token');
     const authBtn = document.getElementById('authBtn');
     if (token) {
@@ -114,19 +111,15 @@
             weight: 2, opacity: 1, color: 'white', dashArray: '3', fillOpacity: 0.7
         }),
         onEachFeature: (feature, layer) => {
-            // CORREÇÃO TOOLTIP: Usa feature.properties.name vindo do banco
-            layer.bindTooltip(`<b>${feature.properties.name}</b>`, {
-                direction: 'top',
-                permanent: false,
-                opacity: 0.9
+            const props = feature.properties;
+            // Tooltip no Mouse
+            layer.bindTooltip(`<b>${props.name}</b>`, {
+                direction: 'top', permanent: false, opacity: 0.9
             });
-            
-            // CORREÇÃO CLICK: Passa os dados para a sidebar
+            // Clique abre Sidebar
             layer.on('click', () => {
-                updateSidebar(feature.properties);
+                updateSidebar(props);
                 toggleSidebar(true);
-                // Opcional: Zoom ao clicar
-                // map.fitBounds(layer.getBounds());
             });
         }
     }).addTo(map);
@@ -136,9 +129,8 @@
                d > 10000 ? '#FD8D3C' : '#FEB24C';
     }
 
-    // --- SIDEBAR LOGIC ---
+    // --- SIDEBAR UI ---
     const sidebar = document.getElementById('sidebar');
-    
     function toggleSidebar(show) {
         if (show) sidebar.classList.add('active');
         else sidebar.classList.remove('active');
@@ -147,34 +139,17 @@
     function updateSidebar(props) {
         document.getElementById('city-title').innerText = props.name || "Cidade";
         
-        // Helper para mostrar ano: (2021) ou vazio
         const showYear = (y) => y ? `(${y})` : '';
+        const fmtNum = (n) => (n !== undefined && n !== null) ? n.toLocaleString('pt-BR') : '-';
+        const fmtMoney = (n) => (n !== undefined && n !== null) ? n.toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'}) : '-';
 
-        // População (Ano fixo 2022 Censo)
-        document.getElementById('val-pop').innerHTML = `
-            ${(props.population || 0).toLocaleString('pt-BR')} 
-            <small style='font-size:0.6em; color:#777'>(2022)</small>`;
-        
-        // PIB
-        const pib = (props.pib_per_capita || 0).toLocaleString('pt-BR', {style: 'currency', currency: 'BRL'});
-        document.getElementById('val-pib').innerHTML = `
-            ${pib} 
-            <small style='font-size:0.6em; color:#777'>${showYear(props.pib_year)}</small>`;
-        
-        // Empresas
-        const comp = (props.total_companies || 0).toLocaleString('pt-BR');
-        document.getElementById('val-companies').innerHTML = `
-            ${comp} 
-            <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
-        
-        // Trabalhadores (Renomeado para População Empregada)
-        const work = (props.total_workers || 0).toLocaleString('pt-BR');
-        document.getElementById('val-workers').innerHTML = `
-            ${work} 
-            <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
+        document.getElementById('val-pop').innerHTML = `${fmtNum(props.population)} <small style='font-size:0.6em; color:#777'>(2022)</small>`;
+        document.getElementById('val-pib').innerHTML = `${fmtMoney(props.pib_per_capita)} <small style='font-size:0.6em; color:#777'>${showYear(props.pib_year)}</small>`;
+        document.getElementById('val-companies').innerHTML = `${fmtNum(props.total_companies)} <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
+        document.getElementById('val-workers').innerHTML = `${fmtNum(props.total_workers)} <small style='font-size:0.6em; color:#777'>${showYear(props.companies_year)}</small>`;
     }
 
-    // --- CARGA INICIAL ---
+    // --- LOAD MAP ---
     async function loadMap() {
         try {
             const res = await fetch('/map');
@@ -185,12 +160,12 @@
     }
     loadMap();
 
-    // --- BUSCA & IMPORTAÇÃO ---
+    // --- SEARCH ---
     const searchInput = document.getElementById('search');
     const suggestions = document.getElementById('suggestions');
     const loading = document.getElementById('loading');
-
     let debounce;
+
     searchInput.addEventListener('input', (e) => {
         clearTimeout(debounce);
         const q = e.target.value;
@@ -222,32 +197,24 @@
             
             if (res.ok) {
                 const responseJson = await res.json();
-                console.log("Resposta Importação:", responseJson);
+                await loadMap(); // Atualiza o visual do mapa
                 
-                loadMap(); // Recarrega mapa
-                
-                // --- CORREÇÃO AQUI: Atualiza e abre a Sidebar ---
-                // O Backend retorna: { city: "Nome", data: { pib..., pop... }, metadata: {...} }
+                // Abre a sidebar com os dados retornados
                 const cityProps = {
-                    name: responseJson.city,
-                    ...responseJson.data // Espalha population, pib_total, etc
+                    name: responseJson.city, 
+                    ...responseJson.data 
                 };
                 
                 updateSidebar(cityProps);
                 toggleSidebar(true);
-                // -----------------------------------------------
 
             } else if (res.status === 401) {
                 alert("🔒 Faça login para importar!");
             } else {
-                alert("Erro ao importar.");
+                alert("Erro ao importar. Tente novamente.");
             }
-        } catch(e) { 
-            console.error(e); 
-            alert("Erro de conexão.");
-        } finally { 
-            loading.style.display = 'none'; 
-        }
+        } catch(e) { console.error(e); alert("Erro de conexão."); } 
+        finally { loading.style.display = 'none'; }
     }
 </script>
 </body>

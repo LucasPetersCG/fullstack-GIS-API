@@ -15,6 +15,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.routers import auth
 from app.services.ibge.topology import IbgeTopologyService
+from app.services.ibge.cempre_probe import CempreProbeService
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -78,6 +79,16 @@ async def probe_districts(city_code: str, current_user: User = Depends(get_curre
     service = IbgeTopologyService()
     return await service.probe_hierarchy(city_code)
 
+@app.get("/debug/cempre/{city_code}")
+async def debug_cempre(city_code: str):
+    """
+    Rota de Diagnóstico Técnico para a Tabela 1685 (CEMPRE).
+    Não requer autenticação (para facilitar o teste rápido).
+    """
+    probe = CempreProbeService()
+    return await probe.run_diagnostic(city_code)
+
 # --- FRONTEND ---
 app.mount("/view", StaticFiles(directory="/frontend", html=True), name="frontend")
 app.mount("/login", StaticFiles(directory="/frontend", html=True), name="login")
+

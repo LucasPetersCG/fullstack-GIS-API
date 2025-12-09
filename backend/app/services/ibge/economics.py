@@ -1,86 +1,85 @@
 # backend/app/services/ibge/economics.py
 import httpx
 import logging
-from typing import Dict, Tuple, Any
+import asyncio
+from typing import Dict, Any, Tuple
 
 logger = logging.getLogger(__name__)
 
 class IbgeEconomicsService:
     BASE_URL = "https://servicodados.ibge.gov.br/api/v3/agregados"
+    
+    # Adicionado HEADERS para evitar bloqueio WAF no loop
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json",
+        "Referer": "https://sidra.ibge.gov.br/"
+    }
 
-    async def fetch_pib(self, city_code: str) -> Tuple[float, str]:
+    async def _fetch_single_var(self, table: str, variable: str, city_code: str, classification: str = "") -> Tuple[float, int]:
         """
-        Busca PIB Total (Tabela 5938).
-        Retorna: (Valor em Mil Reais, Ano de Referência)
-        Janela: 2020 a 2025.
+        Busca uma única variável (Ano a Ano).
         """
-        # Solicita os últimos 6 anos possíveis
-        url = f"{self.BASE_URL}/5938/periodos/2025|2024|2023|2022|2021|2020/variaveis/37?localidades=N6[{city_code}]"
+        years = ["2022", "2021", "2020", "2019"]
         
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.get(url)
-                if resp.status_code != 200: return 0.0, ""
+        async with httpx.AsyncClient(timeout=10.0, headers=self.HEADERS) as client:
+            for year in years:
+                # Monta URL CORRETA antes de chamar
+                url = f"{self.BASE_URL}/{table}/periodos/{year}/variaveis/{variable}?localidades=N6[{city_code}]"
+                if classification:
+                    url += f"&classificacao={classification}"
                 
-                data = resp.json()
-                if not data: return 0.0, ""
+                # Delay para não tomar Ban
+                await asyncio.sleep(0.5) 
+                
+                try:
+                    resp = await client.get(url)
+                    if resp.status_code != 200: continue
+                    
+                    data = resp.json()
+                    if not data: continue
 
-                series = data[0]["resultados"][0]["series"][0]["serie"]
-                
-                # Ordena decrescente para pegar o ano mais recente com valor válido
-                for ano in sorted(series.keys(), reverse=True):
-                    val = series[ano]
-                    if val and val not in ["-", "...", "X"]:
-                        return float(val), ano
-                
-                return 0.0, ""
-            except Exception as e:
-                logger.error(f"Erro PIB: {e}")
-                return 0.0, ""
-
-    async def fetch_companies_stats(self, city_code: str) -> Dict[str, int]:
-        """
-        Busca dados do CEMPRE (Tabela 1685).
-        Varredura: 2025 -> 2019.
-        Retorna: {total_companies, total_workers, year}
-        """
-        # Variáveis: 153 (Unidades locais), 154 (Pessoal ocupado)
-        url = f"{self.BASE_URL}/1685/periodos/2025|2024|2023|2022|2021|2020|2019/variaveis/153|154?localidades=N6[{city_code}]&classificacao=12762[0]" 
+                    # Navegação segura
+                    item = data[0]
+                    res_obj = item.get("resultados", [])
+                    if not res_obj: continue
+                    
+                    series = res_obj[0]["series"][0]["serie"]
+                    val_str = list(series.values())[0]
+                    
+                    if val_str and val_str not in ["-", "...", "X"]:
+                        return float(val_str), int(year)
+                        
+                except Exception:
+                    continue
         
+        return 0.0, 0
+
+    async def fetch_pib(self, city_code: str) -> Tuple[float, int]:
+        """PIB Total (Tabela 5938, Var 37)."""
+        logger.info(f"💰 Buscando PIB para {city_code}...")
+        return await self._fetch_single_var("5938", "37", city_code)
+
+    async def fetch_companies_stats(self, city_code: str) -> Dict[str, Any]:
+        """CEMPRE (Tabela 1685)."""
+        logger.info(f"🏢 Buscando Empresas para {city_code}...")
         stats = {"total_companies": 0, "total_workers": 0, "year": 0}
         
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            try:
-                resp = await client.get(url)
-                if resp.status_code != 200: return stats
-                
-                data = resp.json()
-                # O IBGE retorna uma lista com 2 objetos (um para cada variável)
-                # Precisamos achar um ano comum ou o mais recente de cada.
-                
-                # Mapa auxiliar: { '2021': {'153': 100, '154': 500}, '2020': ... }
-                years_data = {}
+        # 1. Busca Empresas (Var 153)
+        comp_val, comp_year = await self._fetch_single_var("1685", "153", city_code)
+        
+        # Fallback com classificação Total se falhar sem
+        if comp_val == 0:
+             comp_val, comp_year = await self._fetch_single_var("1685", "153", city_code, "12762[0]")
 
-                for item in data:
-                    var_id = str(item["id"])
-                    series = item["resultados"][0]["series"][0]["serie"]
-                    
-                    for ano, val in series.items():
-                        if val and val not in ["-", "...", "X"]:
-                            if ano not in years_data: years_data[ano] = {}
-                            years_data[ano][var_id] = int(val)
+        stats["total_companies"] = int(comp_val)
+        stats["year"] = comp_year
 
-                # Agora pega o ano mais recente que tenha AMBOS os dados (ou pelo menos empresas)
-                for ano in sorted(years_data.keys(), reverse=True):
-                    vals = years_data[ano]
-                    # Se tiver empresas (153), usamos esse ano
-                    if "153" in vals:
-                        stats["total_companies"] = vals.get("153", 0)
-                        stats["total_workers"] = vals.get("154", 0)
-                        stats["year"] = int(ano)
-                        break
-                
-                return stats
-            except Exception as e:
-                logger.error(f"Erro CEMPRE: {e}")
-                return stats
+        # 2. Busca Pessoal (Var 154)
+        work_val, _ = await self._fetch_single_var("1685", "154", city_code)
+        if work_val == 0:
+             work_val, _ = await self._fetch_single_var("1685", "154", city_code, "12762[0]")
+             
+        stats["total_workers"] = int(work_val)
+        
+        return stats

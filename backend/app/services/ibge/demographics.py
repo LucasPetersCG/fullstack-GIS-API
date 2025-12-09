@@ -1,108 +1,92 @@
 # backend/app/services/ibge/demographics.py
 import httpx
 import logging
+import asyncio
 from typing import List, Dict
 
 logger = logging.getLogger(__name__)
 
 class IbgeDemographicsService:
     
+    HEADERS = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "application/json, text/plain, */*",
+        "Referer": "https://sidra.ibge.gov.br/"
+    }
+
     async def fetch_city_population(self, city_code: str) -> int:
-        """
-        Busca população total de um município (Censo 2022).
-        API Agregados v3 | Tabela 4714 | Var 93
-        """
-        # N6[{city_code}] -> Nível Município filtrado pelo ID
+        """Busca população total (Censo 2022)."""
         url = f"https://servicodados.ibge.gov.br/api/v3/agregados/4714/periodos/2022/variaveis/93?localidades=N6[{city_code}]"
         
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            logger.info(f"📊 Baixando dados populacionais para {city_code}...")
-            response = await client.get(url)
-            
-            if response.status_code != 200:
-                logger.warning(f"Erro API Dados: {response.status_code}")
-                return 0
-                
-            data = response.json()
-            # O retorno é uma lista. Se vier vazia, não tem dados.
-            if not data:
-                return 0
-
+        async with httpx.AsyncClient(timeout=10.0, headers=self.HEADERS) as client:
             try:
-                # Parsing do JSON complexo do SIDRA
-                # Estrutura típica: [{'resultados': [{'series': [{'serie': {'2022': '12345'}}]}]}]
-                val = data[0]["resultados"][0]["series"][0]["serie"]["2022"]
+                response = await client.get(url)
+                if response.status_code != 200: return 0
                 
-                # Trata valores como "..." ou "-"
+                data = response.json()
+                if not data: return 0
+
+                val = data[0]["resultados"][0]["series"][0]["serie"]["2022"]
                 if val and val.isdigit():
                     return int(val)
                 return 0
-            except (KeyError, IndexError, ValueError) as e:
-                logger.error(f"Erro parsing dados IBGE: {e}")
+            except Exception as e:
+                logger.error(f"Erro Population: {e}")
                 return 0
 
     async def fetch_all_cities_catalog(self) -> List[Dict]:
-            """
-            Baixa a lista de TODOS os municípios do Brasil (Nome + ID + UF).
-            Versão Blindada contra inconsistências da API do IBGE.
-            """
-            url = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"
-            
-            # Timeout aumentado para 60s (lista é grande)
-            async with httpx.AsyncClient(timeout=60.0) as client:
-                logger.info("📚 Baixando catálogo completo de municípios...")
-                try:
-                    response = await client.get(url)
-                    response.raise_for_status()
-                except Exception as e:
-                    logger.error(f"Erro de conexão com IBGE: {e}")
-                    return [] # Retorna lista vazia em vez de quebrar
+        """Baixa catálogo de municípios (Blindado)."""
+        url = "https://servicodados.ibge.gov.br/api/v1/localidades/municipios"
+        
+        async with httpx.AsyncClient(timeout=60.0, headers=self.HEADERS) as client:
+            logger.info("📚 Baixando catálogo completo de municípios...")
+            try:
+                await asyncio.sleep(1) # Delay anti-bloqueio
+                response = await client.get(url)
+                response.raise_for_status()
                 
                 raw_data = response.json()
                 
-                catalog = []
-                for item in raw_data:
-                    try:
-                        # Navegação Segura:
-                        # Usa .get() e "or {}" para garantir que nunca tentamos acessar chaves em None
-                        # Ex: Se microrregiao for None, usa {}, e o próximo .get falha suavemente
-                        micro = item.get("microrregiao") or {}
-                        meso = micro.get("mesorregiao") or {}
-                        uf_obj = meso.get("UF") or {}
-                        
-                        # Se falhar tudo, tenta pegar a UF direto (alguns endpoints retornam diferente)
-                        # ou define 'BR' como fallback
-                        uf_sigla = uf_obj.get("sigla", "BR")
+            except Exception as e:
+                logger.error(f"Erro fatal no catálogo: {e}")
+                return []
+            
+            # Parsing Seguro
+            catalog = []
+            for item in raw_data:
+                try:
+                    micro = item.get("microrregiao") or {}
+                    meso = micro.get("mesorregiao") or {}
+                    uf_obj = meso.get("UF") or {}
+                    uf_sigla = uf_obj.get("sigla", "BR")
 
-                        catalog.append({
-                            "code": str(item["id"]),
-                            "name": item["nome"],
-                            "uf": uf_sigla
-                        })
-                    except Exception as e:
-                        # Loga o erro mas NÃO PARA O LOOP. Pula apenas essa cidade.
-                        logger.warning(f"Ignorando cidade mal formatada ID {item.get('id')}: {e}")
-                        continue
-                
-                logger.info(f"Catálogo processado: {len(catalog)} cidades encontradas.")
-                return catalog
-        
+                    catalog.append({
+                        "code": str(item["id"]),
+                        "name": item["nome"],
+                        "uf": uf_sigla
+                    })
+                except Exception:
+                    continue
+            
+            logger.info(f"Catálogo processado: {len(catalog)} cidades.")
+            return catalog
+
     async def fetch_city_details(self, city_code: str) -> dict:
-        """
-        Busca o nome oficial e UF do município.
-        API Localidades v1.
-        """
+        """Busca o nome oficial e UF."""
         url = f"https://servicodados.ibge.gov.br/api/v1/localidades/municipios/{city_code}"
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(timeout=10.0, headers=self.HEADERS) as client:
             try:
-                response = await client.get(url)
-                if response.status_code == 200:
-                    data = response.json()
-                    # Retorna: {'id': 3504107, 'nome': 'Atibaia', 'microrregiao': ...}
+                r = await client.get(url)
+                if r.status_code == 200:
+                    d = r.json()
+                    # Safe Navigation
+                    micro = d.get("microrregiao") or {}
+                    meso = micro.get("mesorregiao") or {}
+                    uf = meso.get("UF") or {}
+                    
                     return {
-                        "name": data.get("nome"),
-                        "uf": data.get("microrregiao", {}).get("mesorregiao", {}).get("UF", {}).get("sigla", "BR")
+                        "name": d.get("nome"),
+                        "uf": uf.get("sigla", "BR")
                     }
-                return {"name": "Desconhecido", "uf": "BR"}
-            except Exception:
-                return {"name": "Desconhecido", "uf": "BR"}
+            except: pass
+        return {"name": "Desconhecido", "uf": "BR"}
